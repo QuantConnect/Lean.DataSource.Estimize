@@ -25,7 +25,7 @@ namespace QuantConnect.DataLibrary.Tests
     /// <summary>
     /// Example algorithm using the custom data type as a source of alpha
     /// </summary>
-    public class CustomDataAlgorithm : QCAlgorithm
+    public class EstimizeConsensusesEstimatesReleasesDataAlgorithm : QCAlgorithm
     {
         private Symbol _customDataSymbol;
         private Symbol _equitySymbol;
@@ -35,10 +35,13 @@ namespace QuantConnect.DataLibrary.Tests
         /// </summary>
         public override void Initialize()
         {
-            SetStartDate(2013, 10, 07);  //Set Start Date
-            SetEndDate(2013, 10, 11);    //Set End Date
-            _equitySymbol = AddEquity("SPY").Symbol;
-            _customDataSymbol = AddData<MyCustomDataType>(_equitySymbol).Symbol;
+            SetStartDate(2020, 1, 1);  //Set Start Date
+            SetEndDate(2021, 1, 1);    //Set End Date
+            _equitySymbol = AddEquity("AAPL").Symbol;
+
+            AddData<EstimizeConsensus>(_equitySymbol);
+            AddData<EstimizeEstimate>(_equitySymbol);
+            AddData<EstimizeRelease>(_equitySymbol);
         }
 
         /// <summary>
@@ -47,17 +50,20 @@ namespace QuantConnect.DataLibrary.Tests
         /// <param name="slice">Slice object keyed by symbol containing the stock data</param>
         public override void OnData(Slice slice)
         {
-            var data = slice.Get<MyCustomDataType>();
-            if (!data.IsNullOrEmpty())
+            PrintOutEstimizeData<EstimizeConsensus>(slice);
+            PrintOutEstimizeData<EstimizeEstimate>(slice);
+            PrintOutEstimizeData<EstimizeRelease>(slice);
+        }
+
+        private void PrintOutEstimizeData<T>(Slice data) 
+            where T : IBaseData
+        {
+            var estimizeData = data.Get<T>();
+            if (!estimizeData.IsNullOrEmpty()) 
             {
-                // based on the custom data property we will buy or short the underlying equity
-                if (data[_customDataSymbol].SomeCustomProperty == "buy")
+                foreach (var dataPoint in estimizeData.Values) 
                 {
-                    SetHoldings(_equitySymbol, 1);
-                }
-                else if (data[_customDataSymbol].SomeCustomProperty == "sell")
-                {
-                    SetHoldings(_equitySymbol, -1);
+                    Log($"{typeof(T).Name}: {((T)(object)dataPoint)}");
                 }
             }
         }

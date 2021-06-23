@@ -27,7 +27,7 @@ using QuantConnect.DataSource;
 namespace QuantConnect.DataLibrary.Tests
 {
     [TestFixture]
-    public class MyCustomDataTypeTests
+    public class EstimizeEstimateTests
     {
         [Test]
         public void JsonRoundTrip()
@@ -87,12 +87,22 @@ namespace QuantConnect.DataLibrary.Tests
 
         private BaseData CreateNewInstance()
         {
-            return new MyCustomDataType
+            return new EstimizeEstimate
             {
                 Symbol = Symbol.Empty,
                 Time = DateTime.Today,
                 DataType = MarketDataType.Base,
-                SomeCustomProperty = "This is some market related information"
+
+                Id = "0x123456789",
+                Ticker = "AAPL",
+                FiscalYear = 2021,
+                FiscalQuarter = 4,
+                CreatedAt = new DateTime(2021, 6, 29, 12, 0, 0),
+                Eps = null,
+                Revenue = null,
+                UserName = "pepegrillo",
+                AnalystId = "abcdef0123456789",
+                Flagged = false
             };
         }
     }
