@@ -30,6 +30,11 @@ namespace QuantConnect.DataSource
     public class EstimizeRelease : BaseData
     {
         /// <summary>
+        /// Data source ID
+        /// </summary>
+        public static int DataSourceId { get; } = 2014;
+
+        /// <summary>
         /// The unique identifier for the release
         /// </summary>
         [ProtoMember(10)]

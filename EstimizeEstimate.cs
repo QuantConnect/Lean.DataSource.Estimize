@@ -30,6 +30,11 @@ namespace QuantConnect.DataSource
     public class EstimizeEstimate : BaseData
     {
         /// <summary>
+        /// Data source ID
+        /// </summary>
+        public static int DataSourceId { get; } = 2013;
+
+        /// <summary>
         /// The unique identifier for the estimate
         /// </summary>
         [ProtoMember(10)]
