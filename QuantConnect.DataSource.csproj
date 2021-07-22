@@ -24,6 +24,13 @@
     <None Remove="process.sample.ipynb" />
     <None Remove="process.sample.py" />
     <None Remove="process.sample.sh" />
+    <Compile Remove="EstimizeDataAlgorithm.cs" />
+    <Compile Remove="DataQueueHandlers\**" />
+    <EmbeddedResource Remove="DataQueueHandlers\**" />
+    <None Remove="DataQueueHandlers\**" />
+    <Compile Remove="DataProcessing\**" />
+    <EmbeddedResource Remove="DataProcessing\**" />
+    <None Remove="DataProcessing\**" />
   </ItemGroup>
 
 </Project>
