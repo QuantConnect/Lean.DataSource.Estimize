@@ -46,8 +46,6 @@ namespace QuantConnect.DataLibrary.Tests
             var expected = CreateNewInstance();
             var type = expected.GetType();
 
-            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2000, type);
-
             using (var stream = new MemoryStream())
             {
                 Serializer.Serialize(stream, expected);

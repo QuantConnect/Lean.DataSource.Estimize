@@ -15,9 +15,11 @@
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.9.4" />
     <PackageReference Include="Microsoft.TestPlatform.ObjectModel" Version="16.9.4" />
-    <PackageReference Include="QuantConnect.Algorithm" Version="2.5.11800" />
+    <PackageReference Include="QuantConnect.Algorithm" Version="2.5.12384" />
+    <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.12384" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\QuantConnect.DataSource.csproj" />
+    <ProjectReference Include="..\DataProcessing\DataProcessing.csproj" />
   </ItemGroup>
 </Project>

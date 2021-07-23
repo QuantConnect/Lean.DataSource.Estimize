@@ -22,18 +22,32 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using NodaTime;
+using ProtoBuf;
+using ProtoBuf.Meta;
 using QuantConnect.Data;
+using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 
 namespace QuantConnect.DataLibrary.Tests
 {
-    [TestFixture]
+    [SetUpFixture, TestFixture]
     public class EstimizeTests
     {
+        private static IDataProvider EstimizeDataProvider = new DefaultDataProvider();
+        private static Symbol SymbolAAPL = Symbol.Create("AAPL", SecurityType.Equity, Market.USA);
+
         private readonly JsonSerializerSettings _jsonSerializerSettings = new JsonSerializerSettings
         {
             DateTimeZoneHandling = DateTimeZoneHandling.Utc
         };
+
+        [OneTimeSetUp]
+        public void GlobalSetup()
+        {
+            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2012, typeof(EstimizeConsensus));
+            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2013, typeof(EstimizeEstimate));
+            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2014, typeof(EstimizeRelease));
+        }
 
         [Test, Ignore("Requires Estimize credentials")]
         public void EstimizeDownloadDoesNotThrow()
@@ -149,7 +163,7 @@ namespace QuantConnect.DataLibrary.Tests
             var data = new EstimizeRelease();
             var date = new DateTime(2019, 6, 10);
             var source = data.GetSource(config, date, false);
-            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, TestGlobals.DataProvider);
+            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider);
 
             var rows = factory.Read(source).ToList();
 
@@ -233,7 +247,7 @@ namespace QuantConnect.DataLibrary.Tests
             var data = new EstimizeEstimate();
             var date = new DateTime(2019, 6, 10);
             var source = data.GetSource(config, date, false);
-            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, TestGlobals.DataProvider);
+            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider);
 
             var rows = factory.Read(source).ToList();
 
@@ -260,7 +274,7 @@ namespace QuantConnect.DataLibrary.Tests
             var data = new EstimizeConsensus();
             var date = new DateTime(2019, 6, 10);
             var source = data.GetSource(config, date, false);
-            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, TestGlobals.DataProvider);
+            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider);
 
             var rows = factory.Read(source).ToList();
 
@@ -273,7 +287,7 @@ namespace QuantConnect.DataLibrary.Tests
             var settings = new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.All };
 
             var time = new DateTime(2020, 3, 19, 10, 0, 0);
-            var underlyingSymbol = Symbols.AAPL;
+            var underlyingSymbol = SymbolAAPL;
             var symbol = Symbol.CreateBase(typeof(EstimizeRelease), underlyingSymbol, QuantConnect.Market.USA);
 
             var item = new EstimizeRelease
@@ -307,7 +321,7 @@ namespace QuantConnect.DataLibrary.Tests
             var settings = new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.All };
 
             var time = new DateTime(2020, 3, 19, 10, 0, 0);
-            var underlyingSymbol = Symbols.AAPL;
+            var underlyingSymbol = SymbolAAPL;
             var symbol = Symbol.CreateBase(typeof(EstimizeConsensus), underlyingSymbol, QuantConnect.Market.USA);
 
             var item = new EstimizeConsensus
@@ -345,7 +359,7 @@ namespace QuantConnect.DataLibrary.Tests
             var settings = new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.All };
 
             var time = new DateTime(2020, 3, 19, 10, 0, 0);
-            var underlyingSymbol = Symbols.AAPL;
+            var underlyingSymbol = SymbolAAPL;
             var symbol = Symbol.CreateBase(typeof(EstimizeEstimate), underlyingSymbol, QuantConnect.Market.USA);
 
             var item = new EstimizeEstimate
