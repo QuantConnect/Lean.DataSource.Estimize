@@ -13,6 +13,8 @@
  * limitations under the License.
 */
 
+using ProtoBuf;
+using ProtoBuf.Meta;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -77,6 +79,10 @@ namespace QuantConnect.DataSource.DataQueueHandlers
         /// <param name="pollFrequencySeconds">Seconds to wait between polling the API for new data</param>
         public EstimizeDataQueueHandler()
         {
+            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(EstimizeConsensus.DataSourceId, typeof(EstimizeConsensus));
+            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(EstimizeEstimate.DataSourceId, typeof(EstimizeEstimate));
+            RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(EstimizeRelease.DataSourceId, typeof(EstimizeRelease));
+
             _dataAggregator = Composer.Instance.GetPart<IDataAggregator>() ?? 
                 Composer.Instance.GetExportedValueByTypeName<IDataAggregator>(Config.Get("data-aggregator", "QuantConnect.Data.Common.CustomDataAggregator"));
 
