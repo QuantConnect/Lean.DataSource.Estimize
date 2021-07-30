@@ -6,6 +6,7 @@
     <AssemblyName>QuantConnect.DataSource.Estimize</AssemblyName>
     <OutputPath>bin\$(Configuration)</OutputPath>
     <DocumentationFile>$(OutputPath)\QuantConnect.DataSource.Estimize.xml</DocumentationFile>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
