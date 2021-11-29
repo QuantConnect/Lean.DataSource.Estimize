@@ -14,12 +14,12 @@
 */
 
 using QuantConnect.Configuration;
-using QuantConnect.Data;
-using QuantConnect.DataSource;
 using QuantConnect.Logging;
 using System;
 using System.Diagnostics;
 using System.IO;
+using QuantConnect.Interfaces;
+using QuantConnect.Util;
 
 namespace QuantConnect.DataProcessing
 {
@@ -38,6 +38,12 @@ namespace QuantConnect.DataProcessing
     {
         public static void Main()
         {
+            var dataProvider
+                = Composer.Instance.GetExportedValueByTypeName<IDataProvider>(Config.Get("data-provider", "DefaultDataProvider"));
+            var mapFileResolver
+                = Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
+            mapFileResolver.Initialize(dataProvider);
+
             var processingDate = DateTime.UtcNow;
             var date = processingDate.ToString("yyyy-MM-dd HH:mm:ss");
             
@@ -52,7 +58,7 @@ namespace QuantConnect.DataProcessing
             var timer = Stopwatch.StartNew();
 
             // Appends "estimate" to the path we provide it
-            var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder);
+            var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder, mapFileResolver);
             if (!estimateDownloader.Run())
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Estimate data");
@@ -64,7 +70,7 @@ namespace QuantConnect.DataProcessing
             timer.Restart();
 
             // Release data is required for the consensus downloader
-            var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder);
+            var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
             if (!releaseDownloader.Run())
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Release data");
