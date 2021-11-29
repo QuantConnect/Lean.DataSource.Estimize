@@ -25,7 +25,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace QuantConnect.DataProcessing
@@ -40,11 +39,11 @@ namespace QuantConnect.DataProcessing
         /// Creates a new instance of <see cref="EstimizeReleaseDataDownloader"/>
         /// </summary>
         /// <param name="destinationFolder">The folder where the data will be saved</param>
-        public EstimizeReleaseDataDownloader(string destinationFolder)
+        /// <param name="mapFileProvider">The map file provider instance to use</param>
+        public EstimizeReleaseDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
         {
             _destinationFolder = Path.Combine(destinationFolder, "release");
-            _mapFileResolver = Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalDiskMapFileProvider"))
-                .Get(Market.USA);
+            _mapFileResolver = mapFileProvider.Get(AuxiliaryDataKey.EquityUsa);
 
             _processTickers = Config.Get("process-tickers", null)?.Split(",").ToHashSet();
 
