@@ -122,14 +122,14 @@ namespace QuantConnect.DataSource
         /// The weighted EPS consensus by the Estimize community
         /// </summary>
         [ProtoMember(20)]
-        [JsonProperty(PropertyName = "consensus_weighted_eps_estimate")]
+        [JsonProperty(PropertyName = "consensus_weighted_eps_estimate"), JsonConverter(typeof(DecimalNaNJsonConverter))]
         public decimal? ConsensusWeightedEpsEstimate { get; set; }
 
         /// <summary>
         /// The weighted revenue consensus by the Estimize community
         /// </summary>
         [ProtoMember(21)]
-        [JsonProperty(PropertyName = "consensus_weighted_revenue_estimate")]
+        [JsonProperty(PropertyName = "consensus_weighted_revenue_estimate"), JsonConverter(typeof(DecimalNaNJsonConverter))]
         public decimal? ConsensusWeightedRevenueEstimate { get; set; }
 
         /// <summary>
