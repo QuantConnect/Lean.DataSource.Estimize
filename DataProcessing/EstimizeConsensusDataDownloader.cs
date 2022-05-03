@@ -23,13 +23,9 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Configuration;
-using QuantConnect.Data.Auxiliary;
 using QuantConnect.DataSource;
-using QuantConnect.Interfaces;
-using QuantConnect.Util;
 using Type = QuantConnect.DataSource.EstimizeConsensus.ConsensusType;
 using Source = QuantConnect.DataSource.EstimizeConsensus.ConsensusSource;
-using System.Threading;
 
 namespace QuantConnect.DataProcessing
 {
