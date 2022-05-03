@@ -19,7 +19,6 @@ using QuantConnect.Data.Auxiliary;
 using QuantConnect.DataSource;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
-using QuantConnect.Util;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
