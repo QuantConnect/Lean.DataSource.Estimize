@@ -37,7 +37,7 @@ namespace QuantConnect.DataLibrary.Tests
     {
         private static IDataProvider EstimizeDataProvider = new DefaultDataProvider();
         private static IMapFileProvider _mapFileProvider;
-        private static Symbol SymbolAAPL = Symbol.Create("AAPL", SecurityType.Equity, Market.USA);
+        private static Symbol SymbolAAPL => Symbol.Create("AAPL", SecurityType.Equity, Market.USA);
 
         private readonly JsonSerializerSettings _jsonSerializerSettings = new JsonSerializerSettings
         {
@@ -169,7 +169,7 @@ namespace QuantConnect.DataLibrary.Tests
             var data = new EstimizeRelease();
             var date = new DateTime(2019, 6, 10);
             var source = data.GetSource(config, date, false);
-            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider);
+            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider, null);
 
             var rows = factory.Read(source).ToList();
 
@@ -253,7 +253,7 @@ namespace QuantConnect.DataLibrary.Tests
             var data = new EstimizeEstimate();
             var date = new DateTime(2019, 6, 10);
             var source = data.GetSource(config, date, false);
-            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider);
+            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider, null);
 
             var rows = factory.Read(source).ToList();
 
@@ -280,7 +280,7 @@ namespace QuantConnect.DataLibrary.Tests
             var data = new EstimizeConsensus();
             var date = new DateTime(2019, 6, 10);
             var source = data.GetSource(config, date, false);
-            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider);
+            var factory = SubscriptionDataSourceReader.ForSource(source, dataCacheProvider, config, date, false, data, EstimizeDataProvider, null);
 
             var rows = factory.Read(source).ToList();
 

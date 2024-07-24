@@ -122,7 +122,6 @@ namespace QuantConnect.DataProcessing
                                     // data and make backtests non-deterministic. We want to have
                                     // consistency with our data in live trading historical requests as well
                                     var releases = JsonConvert.DeserializeObject<List<EstimizeRelease>>(result, JsonSerializerSettings)
-                                        .Where(x => x.Eps != null)
                                         .GroupBy(x =>
                                         {
                                             var normalizedTicker = NormalizeTicker(ticker);
