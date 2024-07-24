@@ -114,12 +114,13 @@ namespace QuantConnect.DataProcessing
                         ? null
                         : Path.Combine(processedConsensusDirectory.FullName, $"{ticker}.csv");
 
-                    var existingConsensus = (File.Exists(finalPath) ? File.ReadAllLines(finalPath) : new string[] { })
-                        .Concat(processedConsensusFile != null && File.Exists(processedConsensusFile) 
+                    var existingConsensus = (File.Exists(finalPath) ? File.ReadAllLines(finalPath) : Array.Empty<string>())
+                        .Concat(processedConsensusFile != null && File.Exists(processedConsensusFile)
                             ? File.ReadAllLines(processedConsensusFile)
-                            : new string[] { })
+                            : Array.Empty<string>())
                         .Distinct()
-                        .Select(x => new EstimizeConsensus(x))
+                        .Select(x => CreateEstimizeConsensus(x, finalPath, processedConsensusFile))
+                        .Where(x => x != null)
                         .ToList();
                     
                     // We don't need to apply any sort of mapfile transformations to the ticker
@@ -198,6 +199,19 @@ namespace QuantConnect.DataProcessing
             }
 
             return true;
+        }
+
+        private static EstimizeConsensus CreateEstimizeConsensus(string line, string filePath, string processedConsensusFile)
+        {
+            try
+            {
+                return new EstimizeConsensus(line);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"EstimizeConsensusDataDownloader.Run():: Invalid data: {line} Files: {filePath} or {processedConsensusFile}. Message: {e}. StackTrace: {e.StackTrace}");
+                return null;
+            }
         }
 
         private IEnumerable<EstimizeConsensus> Unpack(EstimizeRelease estimizeEstimate, Source source, Type type, JObject jObject)
