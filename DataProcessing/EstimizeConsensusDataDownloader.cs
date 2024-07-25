@@ -48,7 +48,8 @@ namespace QuantConnect.DataProcessing
 
             _processTickers = Config.Get("process-tickers", null)?.Split(",").ToHashSet();
             
-            _releaseFiles = destinationReleaseDirectory.EnumerateFiles("*", SearchOption.AllDirectories)
+            _releaseFiles = destinationReleaseDirectory.EnumerateFiles("*.csv", SearchOption.AllDirectories)
+                .Where(x => !x.Name.StartsWith("."))
                 .ToList();
 
             if (processedDataDirectory != null)
@@ -59,9 +60,10 @@ namespace QuantConnect.DataProcessing
                         "alternative", 
                         "estimize", 
                         "release"));
-                
+
                 _releaseFiles = _releaseFiles.Concat(
-                        processedReleaseDirectory.GetFiles("*", SearchOption.AllDirectories))
+                        processedReleaseDirectory.GetFiles("*.csv", SearchOption.AllDirectories))
+                    .Where(x => !x.Name.StartsWith("."))
                     .ToList();
             }
 
