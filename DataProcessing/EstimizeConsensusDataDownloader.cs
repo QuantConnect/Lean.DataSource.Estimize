@@ -54,12 +54,16 @@ namespace QuantConnect.DataProcessing
 
             if (processedDataDirectory != null)
             {
-                var processedReleaseDirectory = Directory.CreateDirectory(
-                    Path.Combine(
+                var processedReleasePath = Path.Combine(
                         processedDataDirectory.FullName,
-                        "alternative", 
-                        "estimize", 
-                        "release"));
+                        "alternative",
+                        "estimize",
+                        "release");
+                var processedReleaseDirectory = new DirectoryInfo(processedReleasePath);
+                if (!processedReleaseDirectory.Exists)
+                {
+                    processedReleaseDirectory.Create();
+                }
 
                 _releaseFiles = _releaseFiles.Concat(
                         processedReleaseDirectory.GetFiles("*.csv", SearchOption.AllDirectories))
