@@ -59,7 +59,7 @@ namespace QuantConnect.DataProcessing
 
             // Appends "estimate" to the path we provide it
             var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!estimateDownloader.Run())
+            if (!estimateDownloader.Run(processingDate))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Estimate data");
                 Environment.Exit(1);
@@ -71,7 +71,7 @@ namespace QuantConnect.DataProcessing
 
             // Release data is required for the consensus downloader
             var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!releaseDownloader.Run())
+            if (!releaseDownloader.Run(processingDate))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Release data");
                 Environment.Exit(1);
@@ -83,7 +83,7 @@ namespace QuantConnect.DataProcessing
 
             // Consensus data relies on release data
             var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder, new DirectoryInfo(Globals.DataFolder));
-            if (!consensusDownloader.Run())
+            if (!consensusDownloader.Run(processingDate))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Consensus data");
                 Environment.Exit(1);

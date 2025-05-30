@@ -26,6 +26,7 @@ using QuantConnect.Configuration;
 using QuantConnect.DataSource;
 using Type = QuantConnect.DataSource.EstimizeConsensus.ConsensusType;
 using Source = QuantConnect.DataSource.EstimizeConsensus.ConsensusSource;
+using QuantConnect.Util;
 
 namespace QuantConnect.DataProcessing
 {
@@ -37,7 +38,7 @@ namespace QuantConnect.DataProcessing
         private readonly HashSet<string> _processTickers;
 
         /// <summary>
-        /// Creates a new instance of <see cref="EstimizeEstimateDataDownloader"/>
+        /// Creates a new instance of <see cref="EstimizeConsensusDataDownloader"/>
         /// </summary>
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="processedDataDirectory">Processed data directory, the root path of where processed data lives</param>
@@ -81,13 +82,82 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public override bool Run()
+        public override bool Run(DateTime date)
+        {
+            try
+            {
+                Log.Trace($"EstimizeConsensusDataDownloader.Run(): Start processing");
+
+                var fiscalYearQuarterByRelaeseId = File.ReadAllLines(FiscalYearQuarterByRelaeseId)
+                    .Where(x => !x.Trim().IsNullOrEmpty())
+                    .ToDictionary(x => x.Split(',')[0], x => x.Split(',').Skip(1).ToList());
+
+                var tasks = new List<Task>();
+                // Makes sure we don't overrun Estimize rate limits accidentally
+                IndexGate.WaitToProceed();
+
+                tasks.Add(
+                    // Request the last 24 hours updated data
+                    HttpRequester($"/consensuses/recently_updated?within=1440")
+                        .ContinueWith(
+                            y =>
+                            {
+                                if (y.IsFaulted)
+                                {
+                                    Log.Error($"EstimizeConsensusDataDownloader.Run(): Failed to get data");
+                                    return;
+                                }
+
+                                var result = y.Result;
+                                if (string.IsNullOrEmpty(result))
+                                {
+                                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No data received");
+                                    return;
+                                }
+
+                                var consensuses = JsonConvert.DeserializeObject<List<EstimizeConsensus>>(result, JsonSerializerSettings);
+
+                                foreach (var x in consensuses)
+                                {
+                                    if (x.Id.IsNullOrEmpty() || !fiscalYearQuarterByRelaeseId.TryGetValue(x.Id, out var fiscalPeriodData))
+                                    {
+                                        Log.Trace($"EstimizeConsensusDataDownloader.Run(): Release data with ID {x.Id} is not found, skipping...");
+                                        continue;
+                                    }
+
+                                    var ticker = fiscalPeriodData[0];
+                                    x.FiscalYear = Convert.ToInt32(fiscalPeriodData[1]);
+                                    x.FiscalQuarter = Convert.ToInt32(fiscalPeriodData[2]);
+                                    var csvContents = new[] { $"{x.UpdatedAt.ToUniversalTime():yyyyMMdd HH:mm:ss},{x.Id},{x.Source},{x.Type},{x.Mean},{x.High},{x.Low},{x.StandardDeviation},{x.FiscalYear},{x.FiscalQuarter},{x.Count}" };
+                                    SaveContentToFile(_destinationFolder, ticker, csvContents);
+                                }
+                            }
+                        )
+                    );
+
+                Task.WaitAll(tasks.ToArray());
+            }
+            catch (Exception e)
+            {
+                Log.Error(e, "EstimizeConsensusDataDownloader.Run(): Failure in consensus download");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Runs the instance of the object.
+        /// </summary>
+        /// <returns>True if process all downloads successfully</returns>
+        /// <remarks>Method for regenerate all consensus data</remarks>
+        public bool Run()
         {
             try
             {
                 if (_releaseFiles.Count == 0)
                 {
-                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No files found. Please run EstimizeEstimateDataDownloader first");
+                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No files found. Please run EstimizeConsensusDataDownloader first");
                     return false;
                 }
 
@@ -180,6 +250,10 @@ namespace QuantConnect.DataProcessing
                                         list.AddRange(Unpack(release, Source.WallStreet, Type.Revenue, jObject));
                                         list.AddRange(Unpack(release, Source.Estimize, Type.Eps, jObject));
                                         list.AddRange(Unpack(release, Source.Estimize, Type.Revenue, jObject));
+                                        list.AddRange(Unpack(release, Source.WeightedWallStreet, Type.Eps, jObject));
+                                        list.AddRange(Unpack(release, Source.WeightedWallStreet, Type.Revenue, jObject));
+                                        list.AddRange(Unpack(release, Source.WeightedEstimize, Type.Eps, jObject));
+                                        list.AddRange(Unpack(release, Source.WeightedEstimize, Type.Revenue, jObject));
 
                                         return list;
                                     }
@@ -220,7 +294,7 @@ namespace QuantConnect.DataProcessing
             }
         }
 
-        private IEnumerable<EstimizeConsensus> Unpack(EstimizeRelease estimizeEstimate, Source source, Type type, JObject jObject)
+        private IEnumerable<EstimizeConsensus> Unpack(EstimizeRelease EstimizeConsensus, Source source, Type type, JObject jObject)
         {
             var jToken = jObject[source.ToLower()][type.ToLower()];
             var revisionsJToken = jToken["revisions"];
@@ -233,9 +307,9 @@ namespace QuantConnect.DataProcessing
 
             foreach (var consensus in consensuses)
             {
-                consensus.Id = estimizeEstimate.Id;
-                consensus.FiscalYear = estimizeEstimate.FiscalYear;
-                consensus.FiscalQuarter = estimizeEstimate.FiscalQuarter;
+                consensus.Id = EstimizeConsensus.Id;
+                consensus.FiscalYear = EstimizeConsensus.FiscalYear;
+                consensus.FiscalQuarter = EstimizeConsensus.FiscalQuarter;
                 consensus.Source = source;
                 consensus.Type = type;
             }

@@ -26,7 +26,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace QuantConnect.DataProcessing
@@ -41,6 +40,8 @@ namespace QuantConnect.DataProcessing
             '-',
             '_'
         };
+
+        protected readonly string FiscalYearQuarterByRelaeseId = "FiscalYearQuarterByRelaeseId.csv";
 
         /// <summary>
         /// Control the rate of download per unit of time.
@@ -64,7 +65,7 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public abstract bool Run();
+        public abstract bool Run(DateTime date);
 
         /// <summary>
         /// Get Trading Economics data for a given this start and end times(in UTC).
