@@ -44,7 +44,10 @@ namespace QuantConnect.DataProcessing
                 = Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
             mapFileResolver.Initialize(dataProvider);
 
-            var processingDate = DateTime.UtcNow;
+            var processingDateValue = Config.Get("processing-date", Environment.GetEnvironmentVariable("QC_DATAFLEET_DEPLOYMENT_DATE"));
+            var processingDate = processingDateValue.IsNullOrEmpty() ? 
+                DateTime.UtcNow.Date :
+                Parse.DateTimeExact(processingDateValue, "yyyyMMdd");
             var date = processingDate.ToString("yyyy-MM-dd HH:mm:ss");
             
             var temporaryFolder = Config.Get("temp-output-directory", "/temp-output-directory");
@@ -59,7 +62,7 @@ namespace QuantConnect.DataProcessing
 
             // Appends "estimate" to the path we provide it
             var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!estimateDownloader.Run())
+            if (!estimateDownloader.Run(processingDate))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Estimate data");
                 Environment.Exit(1);
@@ -71,7 +74,7 @@ namespace QuantConnect.DataProcessing
 
             // Release data is required for the consensus downloader
             var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!releaseDownloader.Run())
+            if (!releaseDownloader.Run(processingDate))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Release data");
                 Environment.Exit(1);
@@ -83,7 +86,7 @@ namespace QuantConnect.DataProcessing
 
             // Consensus data relies on release data
             var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder, new DirectoryInfo(Globals.DataFolder));
-            if (!consensusDownloader.Run())
+            if (!consensusDownloader.Run(processingDate))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Consensus data");
                 Environment.Exit(1);

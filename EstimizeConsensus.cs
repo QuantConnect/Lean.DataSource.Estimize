@@ -14,8 +14,10 @@
 */
 
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using System;
 using System.IO;
+using System.Runtime.Serialization;
 using NodaTime;
 using ProtoBuf;
 using QuantConnect.Data;
@@ -38,21 +40,21 @@ namespace QuantConnect.DataSource
         /// The unique identifier for the estimate
         /// </summary>
         [ProtoMember(10)]
-        [JsonProperty(PropertyName = "id")]
+        [JsonProperty(PropertyName = "release_id")]
         public string Id { get; set; }
 
         /// <summary>
         /// Consensus source (Wall Street or Estimize)
         /// </summary>
         [ProtoMember(11)]
-        [JsonProperty(PropertyName = "source")]
+        [JsonProperty(PropertyName = "population")]
         public ConsensusSource? Source { get; set; }
 
         /// <summary>
         /// Type of Consensus (EPS or Revenue)
         /// </summary>
         [ProtoMember(12)]
-        [JsonProperty(PropertyName = "type")]
+        [JsonProperty(PropertyName = "metric")]
         public ConsensusType? Type { get; set; }
 
         /// <summary>
@@ -227,35 +229,50 @@ namespace QuantConnect.DataSource
         /// <summary>
         /// Source of the Consensus
         /// </summary>
+        [JsonConverter(typeof(StringEnumConverter))]
         public enum ConsensusSource
         {
             /// <summary>
             /// Consensus from Wall Street
             /// </summary>
-            [JsonProperty(PropertyName = "wallstreet")]
+            [EnumMember(Value = "wallstreet")]
             WallStreet,
 
             /// <summary>
             /// Consensus from Estimize
             /// </summary>
-            [JsonProperty(PropertyName = "estimize")]
-            Estimize
+            [EnumMember(Value = "estimize")]
+            Estimize,
+
+            /// <summary>
+            /// Weighted consensus from Wall Street
+            /// </summary>
+            [EnumMember(Value = "wallstreet_weighted")]
+            WeightedWallStreet,
+
+            /// <summary>
+            /// Weighted consensus from Estimize
+            /// </summary>
+            [EnumMember(Value = "estimize_weighted")]
+            WeightedEstimize
         }
 
         /// <summary>
         /// Type of the consensus
         /// </summary>
+        [JsonConverter(typeof(StringEnumConverter))]
         public enum ConsensusType
         {
             /// <summary>
             /// Consensus on earnings per share value
             /// </summary>
-            [JsonProperty(PropertyName = "eps")] Eps,
+            [EnumMember(Value = "eps")]
+            Eps,
 
             /// <summary>
             /// Consensus on revenue value
             /// </summary>
-            [JsonProperty(PropertyName = "revenue")]
+            [EnumMember(Value = "revenue")]
             Revenue
         }
     }

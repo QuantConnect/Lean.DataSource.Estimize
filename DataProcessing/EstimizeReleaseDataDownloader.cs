@@ -53,7 +53,7 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public override bool Run()
+        public override bool Run(DateTime date)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -64,6 +64,8 @@ namespace QuantConnect.DataProcessing
                 var currentPercent = 0.05;
                 var percent = 0.05;
                 var i = 0;
+
+                var fiscalYearQuarterByRelaeseId = new List<string>();
 
                 Log.Trace($"EstimizeReleaseDataDownloader.Run(): Start processing {count} companies");
 
@@ -90,13 +92,13 @@ namespace QuantConnect.DataProcessing
                         Log.Trace($"EstimizeReleaseDataDownloader.Run(): Skipping {ticker} since it is not in the list of predefined tickers");
                         continue;
                     }
-                    
+
                     // Makes sure we don't overrun Estimize rate limits accidentally
                     IndexGate.WaitToProceed();
-                    
+
                     // Begin processing ticker with a normalized value
                     Log.Trace($"EstimizeReleaseDataDownloader.Run(): Processing {ticker}");
-                    
+
                     tasks.Add(
                         HttpRequester($"/companies/{ticker}/releases")
                             .ContinueWith(
@@ -168,6 +170,8 @@ namespace QuantConnect.DataProcessing
                                     {
                                         var csvContents = kvp.Select(x => $"{x.ReleaseDate.ToUniversalTime():yyyyMMdd HH:mm:ss},{x.Id},{x.FiscalYear},{x.FiscalQuarter},{x.Eps},{x.Revenue},{x.ConsensusEpsEstimate},{x.ConsensusRevenueEstimate},{x.WallStreetEpsEstimate},{x.WallStreetRevenueEstimate},{x.ConsensusWeightedEpsEstimate},{x.ConsensusWeightedRevenueEstimate}");
                                         SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
+
+                                        fiscalYearQuarterByRelaeseId.AddRange(kvp.Select(x => $"{x.Id},{kvp.Key},{x.FiscalYear},{x.FiscalQuarter}"));
                                     }
 
                                     var percentDone = i / count;
@@ -182,6 +186,8 @@ namespace QuantConnect.DataProcessing
                 }
 
                 Task.WaitAll(tasks.ToArray());
+                var infoCsvPath = Path.Combine(Directory.GetParent(_destinationFolder).FullName, FiscalYearQuarterByRelaeseId);
+                File.WriteAllLines(infoCsvPath, new HashSet<string>(fiscalYearQuarterByRelaeseId));
             }
             catch (Exception e)
             {

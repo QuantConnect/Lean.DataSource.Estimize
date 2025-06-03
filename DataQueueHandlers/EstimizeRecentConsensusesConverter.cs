@@ -17,7 +17,6 @@ using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using QuantConnect.DataSource;
 
 namespace QuantConnect.DataSource.DataQueueHandlers
 {
@@ -36,7 +35,7 @@ namespace QuantConnect.DataSource.DataQueueHandlers
         /// </summary>
         /// <param name="objectType">Type of the object</param>
         /// <returns></returns>
-        public override bool CanConvert(System.Type objectType)
+        public override bool CanConvert(Type objectType)
         {
             return objectType == typeof(List<EstimizeConsensus>);
         }
@@ -49,21 +48,16 @@ namespace QuantConnect.DataSource.DataQueueHandlers
         /// <param name="existingValue">Existing value</param>
         /// <param name="serializer">JSON Serializer</param>
         /// <returns><see cref="EstimizeConsensus"/></returns>
-        public override object ReadJson(JsonReader reader, System.Type objectType, object existingValue, JsonSerializer serializer)
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
             var token = JToken.ReadFrom(reader) as JArray;
             var parsedEntries = new List<EstimizeConsensus>();
 
             foreach (var entry in token)
             {
-                if (entry["population"].Value<string>().Contains("_weighted"))
-                {
-                    continue;
-                }
-
-                entry["id"] = entry["release_id"];
-                entry["source"] = entry["population"];
-                entry["type"] = entry["metric"];
+                entry["release_id"] = entry["id"];
+                entry["population"] = entry["source"];
+                entry["metric"] = entry["type"];
 
                 parsedEntries.Add(entry.ToObject<EstimizeConsensus>());
             }

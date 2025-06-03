@@ -565,7 +565,7 @@ namespace QuantConnect.DataSource.DataQueueHandlers
             /// Not implemented
             /// </summary>
             /// <returns>Error</returns>
-            public override bool Run()
+            public override bool Run(DateTime date)
             {
                 throw new NotImplementedException();
             }

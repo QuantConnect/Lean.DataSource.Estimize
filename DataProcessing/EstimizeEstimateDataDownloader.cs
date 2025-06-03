@@ -14,7 +14,6 @@
 */
 
 using Newtonsoft.Json;
-using QuantConnect.Configuration;
 using QuantConnect.Data.Auxiliary;
 using QuantConnect.DataSource;
 using QuantConnect.Interfaces;
@@ -32,7 +31,6 @@ namespace QuantConnect.DataProcessing
     {
         private readonly string _destinationFolder;
         private readonly MapFileResolver _mapFileResolver;
-        private readonly HashSet<string> _processTickers;
 
         /// <summary>
         /// Creates a new instance of <see cref="EstimizeEstimateDataDownloader"/>
@@ -44,8 +42,6 @@ namespace QuantConnect.DataProcessing
             _destinationFolder = Path.Combine(destinationFolder, "estimate");
             _mapFileResolver = mapFileProvider.Get(AuxiliaryDataKey.EquityUsa);
 
-            _processTickers = Config.Get("process-tickers", null)?.Split(",").ToHashSet();
-
             Directory.CreateDirectory(_destinationFolder);
         }
 
@@ -53,139 +49,103 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public override bool Run()
+        public override bool Run(DateTime date)
         {
             var stopwatch = Stopwatch.StartNew();
 
             try
             {
-                var companies = GetCompanies().Result.DistinctBy(x => x.Ticker).ToList();
-                var count = companies.Count;
-                var currentPercent = 0.05;
-                var percent = 0.05;
-                var i = 0;
-
-                Log.Trace($"EstimizeEstimateDataDownloader.Run(): Start processing {count.ToStringInvariant()} companies");
+                Log.Trace($"EstimizeEstimateDataDownloader.Run(): Start processing");
 
                 var tasks = new List<Task>();
+                // Makes sure we don't overrun Estimize rate limits accidentally
+                IndexGate.WaitToProceed();
 
-                foreach (var company in companies)
-                {
-                    // Include tickers that are "defunct".
-                    // Remove the tag because it cannot be part of the API endpoint.
-                    // This is separate from the NormalizeTicker(...) method since
-                    // we don't convert tickers with `-`s into the format we can successfully
-                    // index mapfiles with.
-                    var estimizeTicker = company.Ticker;
-                    string ticker;
-
-                    if (!TryNormalizeDefunctTicker(estimizeTicker, out ticker))
-                    {
-                        Log.Error($"EstimizeEstimateDataDownloader(): Defunct ticker {estimizeTicker} is unable to be parsed. Continuing...");
-                        continue;
-                    }
-
-                    if (_processTickers != null && !_processTickers.Contains(ticker, StringComparer.InvariantCultureIgnoreCase))
-                    {
-                        Log.Trace($"EstimizeEstimateDataDownloader.Run(): Skipping {ticker} since it is not in the list of predefined tickers");
-                        continue;
-                    }
-
-                    // Begin processing ticker with a normalized value
-                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): Processing {ticker}");
-
-                    // Makes sure we don't overrun Estimize rate limits accidentally
-                    IndexGate.WaitToProceed();
-
-                    tasks.Add(
-                        HttpRequester($"/companies/{ticker}/estimates")
-                            .ContinueWith(
-                                y =>
+                tasks.Add(
+                    // Extra days for redundancy
+                    HttpRequester($"/estimates?start_date={date.AddDays(-5):yyyy-MM-dd}&end_date={date:yyyy-MM-dd}")
+                        .ContinueWith(
+                            y =>
+                            {
+                                if (y.IsFaulted)
                                 {
-                                    i++;
+                                    Log.Error($"EstimizeEstimateDataDownloader.Run(): Failed to get data");
+                                    return;
+                                }
 
-                                    if (y.IsFaulted)
+                                var result = y.Result;
+                                if (string.IsNullOrEmpty(result))
+                                {
+                                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): No data received");
+                                    return;
+                                }
+
+                                var estimates = JsonConvert.DeserializeObject<List<EstimizeEstimate>>(result, JsonSerializerSettings)
+                                    .GroupBy(estimate =>
                                     {
-                                        Log.Error($"EstimizeEstimateDataDownloader.Run(): Failed to get data for {company}");
-                                        return;
-                                    }
-
-                                    var result = y.Result;
-                                    if (string.IsNullOrEmpty(result))
-                                    {
-                                        // We've already logged inside HttpRequester
-                                        return;
-                                    }
-
-                                    var estimates = JsonConvert.DeserializeObject<List<EstimizeEstimate>>(result, JsonSerializerSettings)
-                                        .GroupBy(estimate =>
+                                        if (!TryNormalizeDefunctTicker(estimate.Ticker, out var ticker))
                                         {
-                                            var normalizedTicker = NormalizeTicker(ticker);
-                                            var oldTicker = normalizedTicker;
-                                            var newTicker = normalizedTicker;
-                                            var createdAt = estimate.CreatedAt;
+                                            Log.Error($"EstimizeEstimateDataDownloader(): Defunct ticker {estimate.Ticker} is unable to be parsed. Continuing...");
+                                            return string.Empty;
+                                        }
+                                        var normalizedTicker = NormalizeTicker(ticker);
+                                        var oldTicker = normalizedTicker;
+                                        var newTicker = normalizedTicker;
+                                        var createdAt = estimate.CreatedAt;
 
-                                            try
+                                        try
+                                        {
+                                            var mapFile = _mapFileResolver.ResolveMapFile(normalizedTicker, createdAt);
+
+                                            // Ensure we're writing to the correct historical ticker
+                                            if (!mapFile.Any())
                                             {
-                                                var mapFile = _mapFileResolver.ResolveMapFile(normalizedTicker, createdAt);
-
-                                                // Ensure we're writing to the correct historical ticker
-                                                if (!mapFile.Any())
-                                                {
-                                                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): Failed to find map file for: {newTicker} - on: {createdAt}");
-                                                    return string.Empty;
-                                                }
-
-                                                newTicker = mapFile.GetMappedSymbol(createdAt);
-                                                if (string.IsNullOrWhiteSpace(newTicker))
-                                                {
-                                                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): New ticker is null. Old ticker: {oldTicker} - on: {createdAt.ToStringInvariant()}");
-                                                    return string.Empty;
-                                                }
-
-                                                if (!string.Equals(oldTicker, newTicker, StringComparison.InvariantCultureIgnoreCase))
-                                                {
-                                                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): Remapping {oldTicker} to {newTicker}");
-                                                }
-                                            }
-                                            // We get a failure inside the map file constructor rarely. It tries
-                                            // to access the last element of an empty list. Maybe this is a bug?
-                                            catch (InvalidOperationException e)
-                                            {
-                                                Log.Error(e, $"EstimizeEstimateDataDownloader.Run(): Failed to load map file for: {oldTicker} - on {createdAt}");
+                                                Log.Trace($"EstimizeEstimateDataDownloader.Run(): Failed to find map file for: {newTicker} - on: {createdAt}");
                                                 return string.Empty;
                                             }
 
-                                            return newTicker;
-                                        })
-                                        .Where(kvp => !string.IsNullOrEmpty(kvp.Key));
+                                            newTicker = mapFile.GetMappedSymbol(createdAt);
+                                            if (string.IsNullOrWhiteSpace(newTicker))
+                                            {
+                                                Log.Trace($"EstimizeEstimateDataDownloader.Run(): New ticker is null. Old ticker: {oldTicker} - on: {createdAt.ToStringInvariant()}");
+                                                return string.Empty;
+                                            }
 
-                                    foreach (var kvp in estimates)
-                                    {
-                                        var csvContents = kvp.Select(x =>
-                                            $"{x.CreatedAt.ToStringInvariant("yyyyMMdd HH:mm:ss")}," +
-                                            $"{x.Id}," +
-                                            $"{x.AnalystId}," +
-                                            $"{x.UserName}," +
-                                            $"{x.FiscalYear.ToStringInvariant()}," +
-                                            $"{x.FiscalQuarter.ToStringInvariant()}," +
-                                            $"{x.Eps.ToStringInvariant()}," +
-                                            $"{x.Revenue.ToStringInvariant()}," +
-                                            $"{x.Flagged.ToStringInvariant().ToLowerInvariant()}"
-                                        );
-                                        SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
-                                    }
+                                            if (!string.Equals(oldTicker, newTicker, StringComparison.InvariantCultureIgnoreCase))
+                                            {
+                                                Log.Trace($"EstimizeEstimateDataDownloader.Run(): Remapping {oldTicker} to {newTicker}");
+                                            }
+                                        }
+                                        // We get a failure inside the map file constructor rarely. It tries
+                                        // to access the last element of an empty list. Maybe this is a bug?
+                                        catch (InvalidOperationException e)
+                                        {
+                                            Log.Error(e, $"EstimizeEstimateDataDownloader.Run(): Failed to load map file for: {oldTicker} - on {createdAt}");
+                                            return string.Empty;
+                                        }
 
-                                    var percentageDone = i / count;
-                                    if (percentageDone >= currentPercent)
-                                    {
-                                        Log.Trace($"EstimizeEstimateDataDownloader.Run(): {percentageDone.ToStringInvariant("P2")} complete");
-                                        currentPercent += percent;
-                                    }
+                                        return newTicker;
+                                    })
+                                    .Where(kvp => !string.IsNullOrEmpty(kvp.Key));
+
+                                foreach (var kvp in estimates)
+                                {
+                                    var csvContents = kvp.Select(x =>
+                                        $"{x.CreatedAt.ToStringInvariant("yyyyMMdd HH:mm:ss")}," +
+                                        $"{x.Id}," +
+                                        $"{x.AnalystId}," +
+                                        $"{x.UserName}," +
+                                        $"{x.FiscalYear.ToStringInvariant()}," +
+                                        $"{x.FiscalQuarter.ToStringInvariant()}," +
+                                        $"{x.Eps.ToStringInvariant()}," +
+                                        $"{x.Revenue.ToStringInvariant()}," +
+                                        $"{x.Flagged.ToStringInvariant().ToLowerInvariant()}"
+                                    );
+                                    SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
                                 }
-                            )
+                            }
+                        )
                     );
-                }
 
                 Task.WaitAll(tasks.ToArray());
             }
