@@ -186,7 +186,8 @@ namespace QuantConnect.DataProcessing
                 }
 
                 Task.WaitAll(tasks.ToArray());
-                File.WriteAllLines(FiscalYearQuarterByRelaeseId, new HashSet<string>(fiscalYearQuarterByRelaeseId));
+                var infoCsvPath = Path.Combine(Directory.GetParent(_destinationFolder).FullName, FiscalYearQuarterByRelaeseId);
+                File.WriteAllLines(infoCsvPath, new HashSet<string>(fiscalYearQuarterByRelaeseId));
             }
             catch (Exception e)
             {

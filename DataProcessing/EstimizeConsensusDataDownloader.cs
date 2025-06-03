@@ -88,7 +88,8 @@ namespace QuantConnect.DataProcessing
             {
                 Log.Trace($"EstimizeConsensusDataDownloader.Run(): Start processing");
 
-                var fiscalYearQuarterByRelaeseId = File.ReadAllLines(FiscalYearQuarterByRelaeseId)
+                var infoCsvPath = Path.Combine(Directory.GetParent(_destinationFolder).FullName, FiscalYearQuarterByRelaeseId);
+                var fiscalYearQuarterByRelaeseId = File.ReadAllLines(infoCsvPath)
                     .Where(x => !x.Trim().IsNullOrEmpty())
                     .ToDictionary(x => x.Split(',')[0], x => x.Split(',').Skip(1).ToList());
 
@@ -157,7 +158,7 @@ namespace QuantConnect.DataProcessing
             {
                 if (_releaseFiles.Count == 0)
                 {
-                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No files found. Please run EstimizeConsensusDataDownloader first");
+                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No files found. Please run EstimizeEstimateDataDownloader first");
                     return false;
                 }
 
@@ -294,7 +295,7 @@ namespace QuantConnect.DataProcessing
             }
         }
 
-        private IEnumerable<EstimizeConsensus> Unpack(EstimizeRelease EstimizeConsensus, Source source, Type type, JObject jObject)
+        private IEnumerable<EstimizeConsensus> Unpack(EstimizeRelease estimizeEstimate, Source source, Type type, JObject jObject)
         {
             var jToken = jObject[source.ToLower()][type.ToLower()];
             var revisionsJToken = jToken["revisions"];
@@ -307,9 +308,9 @@ namespace QuantConnect.DataProcessing
 
             foreach (var consensus in consensuses)
             {
-                consensus.Id = EstimizeConsensus.Id;
-                consensus.FiscalYear = EstimizeConsensus.FiscalYear;
-                consensus.FiscalQuarter = EstimizeConsensus.FiscalQuarter;
+                consensus.Id = estimizeEstimate.Id;
+                consensus.FiscalYear = estimizeEstimate.FiscalYear;
+                consensus.FiscalQuarter = estimizeEstimate.FiscalQuarter;
                 consensus.Source = source;
                 consensus.Type = type;
             }

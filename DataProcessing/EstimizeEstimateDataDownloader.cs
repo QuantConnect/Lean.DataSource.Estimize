@@ -62,8 +62,8 @@ namespace QuantConnect.DataProcessing
                 IndexGate.WaitToProceed();
 
                 tasks.Add(
-                    // An extra day for redundancy
-                    HttpRequester($"/estimates?start_date={date.AddDays(-2):yyyy-MM-dd}&end_date={date:yyyy-MM-dd}")
+                    // Extra days for redundancy
+                    HttpRequester($"/estimates?start_date={date.AddDays(-5):yyyy-MM-dd}&end_date={date:yyyy-MM-dd}")
                         .ContinueWith(
                             y =>
                             {
