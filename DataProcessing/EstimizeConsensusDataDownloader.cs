@@ -82,14 +82,13 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public override bool Run(DateTime date)
+        public bool Run(HashSet<string> infoByReleaseId)
         {
             try
             {
                 Log.Trace($"EstimizeConsensusDataDownloader.Run(): Start processing");
 
-                var infoCsvPath = Path.Combine(Directory.GetParent(_destinationFolder).FullName, FiscalYearQuarterByRelaeseId);
-                var fiscalYearQuarterByRelaeseId = File.ReadAllLines(infoCsvPath)
+                var fiscalYearQuarterByReleaseId = infoByReleaseId
                     .Where(x => !x.Trim().IsNullOrEmpty())
                     .ToDictionary(x => x.Split(',')[0], x => x.Split(',').Skip(1).ToList());
 
@@ -120,7 +119,7 @@ namespace QuantConnect.DataProcessing
 
                                 foreach (var x in consensuses)
                                 {
-                                    if (x.Id.IsNullOrEmpty() || !fiscalYearQuarterByRelaeseId.TryGetValue(x.Id, out var fiscalPeriodData))
+                                    if (x.Id.IsNullOrEmpty() || !fiscalYearQuarterByReleaseId.TryGetValue(x.Id, out var fiscalPeriodData))
                                     {
                                         Log.Trace($"EstimizeConsensusDataDownloader.Run(): Release data with ID {x.Id} is not found, skipping...");
                                         continue;
@@ -137,141 +136,6 @@ namespace QuantConnect.DataProcessing
                     );
 
                 Task.WaitAll(tasks.ToArray());
-            }
-            catch (Exception e)
-            {
-                Log.Error(e, "EstimizeConsensusDataDownloader.Run(): Failure in consensus download");
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Runs the instance of the object.
-        /// </summary>
-        /// <returns>True if process all downloads successfully</returns>
-        /// <remarks>Method for regenerate all consensus data</remarks>
-        public bool Run()
-        {
-            try
-            {
-                if (_releaseFiles.Count == 0)
-                {
-                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No files found. Please run EstimizeEstimateDataDownloader first");
-                    return false;
-                }
-
-                var processedConsensusDirectory = _processedDataDirectory == null 
-                    ? null
-                    : new DirectoryInfo(
-                        Path.Combine(
-                            _processedDataDirectory.FullName,
-                            "alternative",
-                            "estimize",
-                            "consensus"));
-
-                var utcNow = DateTime.UtcNow;
-
-                foreach (var releaseFileInfoGroup in _releaseFiles.GroupBy(x => x.Name))
-                {
-                    var stopwatch = Stopwatch.StartNew();
-                    var tasks = new List<Task<List<EstimizeConsensus>>>();
-                    var ticker = Path.GetFileNameWithoutExtension(releaseFileInfoGroup.Key);
-                    
-                    if (_processTickers != null && !_processTickers.Contains(ticker, StringComparer.InvariantCultureIgnoreCase))
-                    {
-                        Log.Trace($"EstimizeConsensusDataDownloader.Run(): Skipping {ticker} since it is not in the list of predefined tickers");
-                        continue;
-                    }
-                    
-                    var finalPath = Path.Combine(_destinationFolder, $"{ticker}.csv");
-                    
-                    var processedConsensusFile = processedConsensusDirectory == null
-                        ? null
-                        : Path.Combine(processedConsensusDirectory.FullName, $"{ticker}.csv");
-
-                    var existingConsensus = (File.Exists(finalPath) ? File.ReadAllLines(finalPath) : Array.Empty<string>())
-                        .Concat(processedConsensusFile != null && File.Exists(processedConsensusFile)
-                            ? File.ReadAllLines(processedConsensusFile)
-                            : Array.Empty<string>())
-                        .Distinct()
-                        .Select(x => CreateEstimizeConsensus(x, finalPath, processedConsensusFile))
-                        .Where(x => x != null)
-                        .ToList();
-                    
-                    // We don't need to apply any sort of mapfile transformations to the ticker
-                    // since we've already applied mapping to the release file ticker
-                    var existingReleases = new List<EstimizeRelease>();
-                    foreach (var releaseFile in releaseFileInfoGroup)
-                    {
-                        var releasesParsed = File.ReadAllLines(releaseFile.FullName)
-                            .Where(x => !string.IsNullOrWhiteSpace(x))
-                            .Select(x => new EstimizeRelease(x));
-
-                        existingReleases = existingReleases.Concat(releasesParsed).ToList();
-                    }
-
-                    existingReleases = existingReleases
-                        .DistinctBy(x => x.Id)
-                        .ToList();
-
-                    foreach (var release in existingReleases)
-                    {
-                        // We detect duplicates by checking for release IDs that match consensus IDs
-                        // in consensus files and ensuring that no more updates will be published to
-                        // consensus data by making sure the release has been made public
-                        if ((utcNow - release.ReleaseDate).TotalDays > 1 && existingConsensus.Any(x => x.Id == release.Id))
-                        {
-                            Log.Trace($"EstimizeConsensusDataDownloader.Run(): Duplicate entry found for ID {release.Id} in {finalPath} on: {release.ReleaseDate}");
-                            continue;
-                        }
-
-                        Log.Trace($"EstimizeConsensusDataDownloader.Run(): Earnings release: {release.ReleaseDate:yyyy-MM-dd} - Parsing Estimate {release.Id} for: {ticker}");
-
-                        // Makes sure we don't overrun Estimize rate limits accidentally
-                        IndexGate.WaitToProceed();
-
-                        tasks.Add(
-                            HttpRequester($"/releases/{release.Id}/consensus")
-                                .ContinueWith(
-                                    x =>
-                                    {
-                                        var result = x.Result;
-                                        if (string.IsNullOrEmpty(result))
-                                        {
-                                            return new List<EstimizeConsensus>();
-                                        }
-
-                                        var jObject = JObject.Parse(result);
-
-                                        var list = new List<EstimizeConsensus>();
-
-                                        list.AddRange(Unpack(release, Source.WallStreet, Type.Eps, jObject));
-                                        list.AddRange(Unpack(release, Source.WallStreet, Type.Revenue, jObject));
-                                        list.AddRange(Unpack(release, Source.Estimize, Type.Eps, jObject));
-                                        list.AddRange(Unpack(release, Source.Estimize, Type.Revenue, jObject));
-                                        list.AddRange(Unpack(release, Source.WeightedWallStreet, Type.Eps, jObject));
-                                        list.AddRange(Unpack(release, Source.WeightedWallStreet, Type.Revenue, jObject));
-                                        list.AddRange(Unpack(release, Source.WeightedEstimize, Type.Eps, jObject));
-                                        list.AddRange(Unpack(release, Source.WeightedEstimize, Type.Revenue, jObject));
-
-                                        return list;
-                                    }
-                                )
-                        );
-                    }
-
-                    Task.WaitAll(tasks.ToArray());
-
-                    var csvContents = tasks.SelectMany(x => x.Result)
-                        .OrderBy(x => x.UpdatedAt)
-                        .Select(x => $"{x.UpdatedAt.ToUniversalTime():yyyyMMdd HH:mm:ss},{x.Id},{x.Source},{x.Type},{x.Mean},{x.High},{x.Low},{x.StandardDeviation},{x.FiscalYear},{x.FiscalQuarter},{x.Count}");
-
-                    SaveContentToFile(_destinationFolder, ticker, csvContents);
-
-                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): EstimizeConsensus files for {ticker} created : {stopwatch.Elapsed}");
-                }
             }
             catch (Exception e)
             {

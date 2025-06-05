@@ -53,9 +53,10 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public override bool Run(DateTime date)
+        public bool Run(out HashSet<string> infoByReleaseId)
         {
             var stopwatch = Stopwatch.StartNew();
+            infoByReleaseId = new();
 
             try
             {
@@ -65,7 +66,7 @@ namespace QuantConnect.DataProcessing
                 var percent = 0.05;
                 var i = 0;
 
-                var fiscalYearQuarterByRelaeseId = new List<string>();
+                var fiscalYearQuarterByReleaseId = new List<string>();
 
                 Log.Trace($"EstimizeReleaseDataDownloader.Run(): Start processing {count} companies");
 
@@ -171,7 +172,7 @@ namespace QuantConnect.DataProcessing
                                         var csvContents = kvp.Select(x => $"{x.ReleaseDate.ToUniversalTime():yyyyMMdd HH:mm:ss},{x.Id},{x.FiscalYear},{x.FiscalQuarter},{x.Eps},{x.Revenue},{x.ConsensusEpsEstimate},{x.ConsensusRevenueEstimate},{x.WallStreetEpsEstimate},{x.WallStreetRevenueEstimate},{x.ConsensusWeightedEpsEstimate},{x.ConsensusWeightedRevenueEstimate}");
                                         SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
 
-                                        fiscalYearQuarterByRelaeseId.AddRange(kvp.Select(x => $"{x.Id},{kvp.Key},{x.FiscalYear},{x.FiscalQuarter}"));
+                                        fiscalYearQuarterByReleaseId.AddRange(kvp.Select(x => $"{x.Id},{kvp.Key},{x.FiscalYear},{x.FiscalQuarter}"));
                                     }
 
                                     var percentDone = i / count;
@@ -186,8 +187,7 @@ namespace QuantConnect.DataProcessing
                 }
 
                 Task.WaitAll(tasks.ToArray());
-                var infoCsvPath = Path.Combine(Directory.GetParent(_destinationFolder).FullName, FiscalYearQuarterByRelaeseId);
-                File.WriteAllLines(infoCsvPath, new HashSet<string>(fiscalYearQuarterByRelaeseId));
+                infoByReleaseId = new HashSet<string>(fiscalYearQuarterByReleaseId);
             }
             catch (Exception e)
             {

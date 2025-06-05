@@ -13,8 +13,6 @@
  * limitations under the License.
 */
 
-using ProtoBuf;
-using ProtoBuf.Meta;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -22,7 +20,6 @@ using System.Linq;
 using System.Threading;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
-using QuantConnect.DataSource;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
@@ -561,14 +558,6 @@ namespace QuantConnect.DataSource.DataQueueHandlers
         /// </summary>
         protected class EstimizeDownloader : EstimizeDataDownloader
         {
-            /// <summary>
-            /// Not implemented
-            /// </summary>
-            /// <returns>Error</returns>
-            public override bool Run(DateTime date)
-            {
-                throw new NotImplementedException();
-            }
         }
     }
 }

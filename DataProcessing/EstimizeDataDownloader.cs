@@ -41,8 +41,6 @@ namespace QuantConnect.DataProcessing
             '_'
         };
 
-        protected readonly string FiscalYearQuarterByRelaeseId = "FiscalYearQuarterByRelaeseId.csv";
-
         /// <summary>
         /// Control the rate of download per unit of time.
         /// </summary>
@@ -60,12 +58,6 @@ namespace QuantConnect.DataProcessing
             // Represents rate limits of 10 requests per 1.1 second
             IndexGate = new RateGate(10, TimeSpan.FromSeconds(1.1));
         }
-
-        /// <summary>
-        /// Runs the instance of the object.
-        /// </summary>
-        /// <returns>True if process all downloads successfully</returns>
-        public abstract bool Run(DateTime date);
 
         /// <summary>
         /// Get Trading Economics data for a given this start and end times(in UTC).
