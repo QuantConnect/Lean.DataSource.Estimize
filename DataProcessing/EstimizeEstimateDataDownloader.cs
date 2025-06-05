@@ -49,7 +49,7 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public override bool Run(DateTime date)
+        public bool Run(DateTime date)
         {
             var stopwatch = Stopwatch.StartNew();
 

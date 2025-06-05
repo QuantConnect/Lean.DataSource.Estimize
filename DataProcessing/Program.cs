@@ -74,7 +74,7 @@ namespace QuantConnect.DataProcessing
 
             // Release data is required for the consensus downloader
             var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!releaseDownloader.Run(processingDate))
+            if (!releaseDownloader.Run(out var infoByReleaseId))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Release data");
                 Environment.Exit(1);
@@ -86,7 +86,7 @@ namespace QuantConnect.DataProcessing
 
             // Consensus data relies on release data
             var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder, new DirectoryInfo(Globals.DataFolder));
-            if (!consensusDownloader.Run(processingDate))
+            if (!consensusDownloader.Run(infoByReleaseId))
             {
                 Log.Error($"DataProcessing.Main(): {date} - Failed to parse Consensus data");
                 Environment.Exit(1);
