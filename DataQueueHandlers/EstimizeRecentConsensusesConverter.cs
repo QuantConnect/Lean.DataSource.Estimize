@@ -55,7 +55,7 @@ namespace QuantConnect.DataSource.DataQueueHandlers
 
             foreach (var entry in token)
             {
-                entry["release_id"] = entry["id"];
+                entry["release_id"] = entry["id"] ?? entry["release_id"];
                 entry["population"] = entry["source"];
                 entry["metric"] = entry["type"];
 
