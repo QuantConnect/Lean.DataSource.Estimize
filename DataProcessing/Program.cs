@@ -38,46 +38,64 @@ namespace QuantConnect.DataProcessing
     {
         public static void Main()
         {
-            var dataProvider
-                = Composer.Instance.GetExportedValueByTypeName<IDataProvider>(Config.Get("data-provider", "DefaultDataProvider"));
-            var mapFileResolver
-                = Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
-            mapFileResolver.Initialize(dataProvider);
+            var patchData = Config.GetBool("estimize-patch-data", false);
 
             var processingDateValue = Config.Get("processing-date", Environment.GetEnvironmentVariable("QC_DATAFLEET_DEPLOYMENT_DATE"));
-            var processingDate = processingDateValue.IsNullOrEmpty() ? 
+            var processingDate = processingDateValue.IsNullOrEmpty() ?
                 DateTime.UtcNow.Date :
-                Parse.DateTimeExact(processingDateValue, "yyyyMMdd");
+                Parse.DateTimeExact(processingDateValue, "yyyyMMdd");    
             var date = processingDate.ToString("yyyy-MM-dd HH:mm:ss");
-            
+
             var temporaryFolder = Config.Get("temp-output-directory", "/temp-output-directory");
             var tempEstimizeFolder = Path.Combine(temporaryFolder, "alternative", "estimize");
 
+            var mapFileResolver =
+                Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
+            mapFileResolver.Initialize(
+                Composer.Instance.GetExportedValueByTypeName<IDataProvider>(Config.Get("data-provider", "DefaultDataProvider")));
+
             // Makes sure we can download to the temp folder in a clean docker image
             Directory.CreateDirectory(tempEstimizeFolder);
-
-            Log.Trace($"DataProcessing.Main(): Processing {date:yyyy-MM-dd}");
+            var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder, mapFileResolver);
+            var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
+            var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder, mapFileResolver);
 
             var timer = Stopwatch.StartNew();
 
-            // Appends "estimate" to the path we provide it
-            var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!estimateDownloader.Run(processingDate))
+            if (patchData)
             {
-                Log.Error($"DataProcessing.Main(): {date} - Failed to parse Estimate data");
-                Environment.Exit(1);
+                if (!estimateDownloader.ProcessHistoricalData(ref processingDate))
+                {
+                    Log.Error("DataProcessing.Main(): Failed to parse historical Estimate data");
+                }
+
+                if (!consensusDownloader.ProcessHistoricalData())
+                {
+                    Log.Error("DataProcessing.Main(): Failed to parse historical Consensus data");
+                }
+
+                timer.Stop();
+                date = processingDate.ToString("yyyy-MM-dd HH:mm:ss");
+                Log.Trace($"DataProcessing.Main(): {date} - Finished processing historical data in {timer.Elapsed.TotalMinutes} minutes. Begin downloading data");
+                timer.Restart();
             }
 
+            Log.Trace($"DataProcessing.Main(): Processing {date}");
+
+            // Appends "estimate" to the path we provide it
+            if (!estimateDownloader.Run(processingDate, patchData))
+            {
+                Log.Error($"DataProcessing.Main(): {date} - Failed to parse Estimate data");
+            }
+            
             timer.Stop();
             Log.Trace($"DataProcessing.Main(): {date} - Finished parsing Estimate data in {timer.Elapsed.TotalMinutes} minutes. Begin downloading Release data");
             timer.Restart();
 
             // Release data is required for the consensus downloader
-            var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
-            if (!releaseDownloader.Run(out var infoByReleaseId))
+            if (!releaseDownloader.Run())
             {
-                Log.Error($"DataProcessing.Main(): {date} - Failed to parse Release data");
-                Environment.Exit(1);
+                Log.Error($"DataProcessing.Main(): {date} - Failed to parse Release data");    
             }
 
             timer.Stop();
@@ -85,15 +103,13 @@ namespace QuantConnect.DataProcessing
             timer.Restart();
 
             // Consensus data relies on release data
-            var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder, new DirectoryInfo(Globals.DataFolder));
-            if (!consensusDownloader.Run(infoByReleaseId))
+            if (!consensusDownloader.Run(patchData))
             {
-                Log.Error($"DataProcessing.Main(): {date} - Failed to parse Consensus data");
-                Environment.Exit(1);
+                Log.Error($"DataProcessing.Main(): {date} - Failed to parse Consensus data");  
             }
 
             timer.Stop();
-            Log.Trace($"DataProcessing.Main(): {date} - Finished parsing Consensus data in {timer.Elapsed.TotalMinutes} minutes");
+            Log.Trace($"DataProcessing.Main(): {date} - Finished parsing Consensus data in {timer.Elapsed.TotalMinutes} minutes");            
             Environment.Exit(0);
         }
     }

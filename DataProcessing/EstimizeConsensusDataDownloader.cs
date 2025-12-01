@@ -13,173 +13,246 @@
  * limitations under the License.
 */
 
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using QuantConnect.Configuration;
+using QuantConnect.Data.Market;
+using QuantConnect.DataSource;
+using QuantConnect.Interfaces;
 using QuantConnect.Logging;
+using QuantConnect.Util;
+using RestSharp.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using QuantConnect.Configuration;
-using QuantConnect.DataSource;
-using Type = QuantConnect.DataSource.EstimizeConsensus.ConsensusType;
 using Source = QuantConnect.DataSource.EstimizeConsensus.ConsensusSource;
-using QuantConnect.Util;
+using Type = QuantConnect.DataSource.EstimizeConsensus.ConsensusType;
 
 namespace QuantConnect.DataProcessing
 {
     public class EstimizeConsensusDataDownloader : EstimizeDataDownloader
     {
-        private readonly List<FileInfo> _releaseFiles;
-        private readonly string _destinationFolder;
-        private readonly DirectoryInfo _processedDataDirectory;
-        private readonly HashSet<string> _processTickers;
+        private readonly DirectoryInfo _destinationFolder;
+        private readonly DirectoryInfo _releaseFolder;
+        private readonly HashSet<string> _processTickers = [];
 
         /// <summary>
         /// Creates a new instance of <see cref="EstimizeConsensusDataDownloader"/>
         /// </summary>
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="processedDataDirectory">Processed data directory, the root path of where processed data lives</param>
-        public EstimizeConsensusDataDownloader(string destinationFolder, DirectoryInfo processedDataDirectory = null)
+        public EstimizeConsensusDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
+            : base(mapFileProvider)
         {
-            var path = Path.Combine(destinationFolder, "release");
-            var destinationReleaseDirectory = Directory.CreateDirectory(path);
-
-            _processTickers = Config.Get("process-tickers", null)?.Split(",").ToHashSet();
-            
-            _releaseFiles = destinationReleaseDirectory.EnumerateFiles("*.csv", SearchOption.AllDirectories)
-                .Where(x => !x.Name.StartsWith("."))
-                .ToList();
-
-            if (processedDataDirectory != null)
+            _destinationFolder = Directory.CreateDirectory(Path.Combine(destinationFolder, "consensus"));
+            _releaseFolder = _destinationFolder.Parent.CreateSubdirectory("release");
+            if (Config.TryGetValue("process-tickers", out string value) && value.HasValue())
             {
-                var processedReleasePath = Path.Combine(
-                        processedDataDirectory.FullName,
-                        "alternative",
-                        "estimize",
-                        "release");
-                var processedReleaseDirectory = new DirectoryInfo(processedReleasePath);
-                if (!processedReleaseDirectory.Exists)
-                {
-                    processedReleaseDirectory.Create();
-                }
-
-                _releaseFiles = _releaseFiles.Concat(
-                        processedReleaseDirectory.GetFiles("*.csv", SearchOption.AllDirectories))
-                    .Where(x => !x.Name.StartsWith("."))
-                    .ToList();
+                _processTickers = [.. value.Split(",")];
             }
-
-            _destinationFolder = Path.Combine(destinationFolder, "consensus");
-            _processedDataDirectory = processedDataDirectory;
-            
-            Directory.CreateDirectory(_destinationFolder);
         }
 
         /// <summary>
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public bool Run(HashSet<string> infoByReleaseId)
+        public bool Run(bool patchData = false)
         {
-            try
+            var releaseFiles = _releaseFolder.EnumerateFiles("*.csv", SearchOption.AllDirectories).Where(x => !x.Name.StartsWith('.')).ToHashSet();
+
+            if (!_processTickers.IsNullOrEmpty())
             {
-                Log.Trace($"EstimizeConsensusDataDownloader.Run(): Start processing");
-
-                var fiscalYearQuarterByReleaseId = infoByReleaseId
-                    .Where(x => !x.Trim().IsNullOrEmpty())
-                    .ToDictionary(x => x.Split(',')[0], x => x.Split(',').Skip(1).ToList());
-
-                var tasks = new List<Task>();
-                // Makes sure we don't overrun Estimize rate limits accidentally
-                IndexGate.WaitToProceed();
-
-                tasks.Add(
-                    // Request the last 24 hours updated data
-                    HttpRequester($"/consensuses/recently_updated?within=1440")
-                        .ContinueWith(
-                            y =>
-                            {
-                                if (y.IsFaulted)
-                                {
-                                    Log.Error($"EstimizeConsensusDataDownloader.Run(): Failed to get data");
-                                    return;
-                                }
-
-                                var result = y.Result;
-                                if (string.IsNullOrEmpty(result))
-                                {
-                                    Log.Trace($"EstimizeConsensusDataDownloader.Run(): No data received");
-                                    return;
-                                }
-
-                                var consensuses = JsonConvert.DeserializeObject<List<EstimizeConsensus>>(result, JsonSerializerSettings);
-
-                                foreach (var x in consensuses)
-                                {
-                                    if (x.Id.IsNullOrEmpty() || !fiscalYearQuarterByReleaseId.TryGetValue(x.Id, out var fiscalPeriodData))
-                                    {
-                                        Log.Trace($"EstimizeConsensusDataDownloader.Run(): Release data with ID {x.Id} is not found, skipping...");
-                                        continue;
-                                    }
-
-                                    var ticker = fiscalPeriodData[0];
-                                    x.FiscalYear = Convert.ToInt32(fiscalPeriodData[1]);
-                                    x.FiscalQuarter = Convert.ToInt32(fiscalPeriodData[2]);
-                                    var csvContents = new[] { $"{x.UpdatedAt.ToUniversalTime():yyyyMMdd HH:mm:ss},{x.Id},{x.Source},{x.Type},{x.Mean},{x.High},{x.Low},{x.StandardDeviation},{x.FiscalYear},{x.FiscalQuarter},{x.Count}" };
-                                    SaveContentToFile(_destinationFolder, ticker, csvContents);
-                                }
-                            }
-                        )
-                    );
-
-                Task.WaitAll(tasks.ToArray());
+                releaseFiles.RemoveWhere(x => !_processTickers.Contains(x.Name[0..^4].ToUpper()));
             }
-            catch (Exception e)
+
+            var releaseInfo = new Dictionary<string, Tuple<string, int, int>>();
+
+            foreach (var releaseFile in releaseFiles)
             {
-                Log.Error(e, "EstimizeConsensusDataDownloader.Run(): Failure in consensus download");
+                var releases = File.ReadLines(releaseFile.FullName).Select(line => new EstimizeRelease(line)).ToList();
+                releases.DoForEach(x => releaseInfo[x.Id] = Tuple.Create(releaseFile.Name[0..^4], x.FiscalYear, x.FiscalQuarter));
+
+                if (patchData) PatchMissingConsensusData(releaseFile, releases);
+            }
+
+            var result = HttpRequester($"/consensuses/recently_updated?within=1440").Result;
+            if (string.IsNullOrEmpty(result))
+            {
+                Log.Trace($"EstimizeConsensusDataDownloader.Run(): No data received");
                 return false;
             }
+
+            JsonConvert.DeserializeObject<List<EstimizeConsensus>>(result, JsonSerializerSettings)
+                .Where(x => DateTime.UtcNow > x.EndTime && releaseInfo.ContainsKey(x.Id))
+                .GroupBy(x => releaseInfo[x.Id].Item1)
+                .DoForEach(kvp =>
+                {
+                    var csvContents = kvp.Select(consensus =>
+                    {
+                        var info = releaseInfo[consensus.Id];
+                        return $"{consensus.UpdatedAt.ToUniversalTime():yyyyMMdd HH:mm:ss}," +
+                               $"{consensus.Id}," +
+                               $"{consensus.Source}," +
+                               $"{consensus.Type}," +
+                               $"{consensus.Mean},{consensus.High},{consensus.Low},{consensus.StandardDeviation}," +
+                               $"{info.Item2},{info.Item3},{consensus.Count}";
+                    });
+                    SaveContentToFile(_destinationFolder.FullName, kvp.Key, csvContents);
+                });
 
             return true;
         }
 
-        private static EstimizeConsensus CreateEstimizeConsensus(string line, string filePath, string processedConsensusFile)
+        public bool ProcessHistoricalData()
         {
-            try
+            var filename = Config.Get("estimize-historical-file", null);
+            if (string.IsNullOrEmpty(filename) || !File.Exists(filename))
             {
-                return new EstimizeConsensus(line);
+                return true;
             }
-            catch (Exception e)
+
+            var stopwatch = Stopwatch.StartNew();
+            var contentsBySymbol = new Dictionary<string, List<string>>();
+            using var entryStream = Compression.Unzip(filename, "combined_consensus_new.csv", out _);
+
+            //date,ticker,cusip,instrument_id,instrument_name,instrument_sector,instrument_industry,fiscal_year,fiscal_quarter,reports_at,
+            //  estimize.eps.weighted,estimize.eps.high,estimize.eps.low,estimize.eps.sd,estimize.eps.count,
+            //  estimize.revenue.weighted,estimize.revenue.high,estimize.revenue.low,estimize.revenue.sd,estimize.revenue.count,
+            //wallstreet.eps,wallstreet.revenue,actual.eps,actual.revenue,release_id,point_in_time_ticker,point_in_time_cusip,period_ends_on
+            while (!entryStream.EndOfStream)
             {
-                Log.Error($"EstimizeConsensusDataDownloader.Run():: Invalid data: {line} Files: {filePath} or {processedConsensusFile}. Message: {e}. StackTrace: {e.StackTrace}");
-                return null;
+                var line = entryStream.ReadLine();
+
+                if (line.Count(x => x == ',') > 27)
+                {
+                    var instrumentName = line[line.IndexOf('\"')..(line.LastIndexOf('\"') + 1)];
+                    line = line.Replace(instrumentName, string.Empty);
+                }
+
+                var csv = line.Split(',').Select(x => x.Trim()).ToArray();
+                if (csv.Length < 28 || !char.IsDigit(csv[9], 0))
+                {
+                    continue;
+                }
+
+                var reportsdAt = Parse.DateTimeExact(csv[9], "yyyy-MM-ddTHH:mm:sszzz", System.Globalization.DateTimeStyles.AdjustToUniversal);
+                if (reportsdAt.Year < 2011 || reportsdAt > DateTime.UtcNow)
+                {
+                    continue;
+                }
+
+                var mappedSymbol = GetMappedSymbol(
+                    string.IsNullOrWhiteSpace(csv[^3]) ? csv[1] : csv[^3],
+                    reportsdAt);
+
+                if (string.IsNullOrEmpty(mappedSymbol))
+                {
+                    continue;
+                }
+
+                if (!contentsBySymbol.TryGetValue(mappedSymbol, out var contents))
+                {
+                    contentsBySymbol[mappedSymbol] = contents = [];
+                }
+
+                var eventId = $"{reportsdAt.ToStringInvariant("yyyyMMdd HH:mm:ss")},{csv[^4]}";
+                var quarter = $"{csv[7]},{csv[8]}";
+
+                if (!string.IsNullOrWhiteSpace(csv[10]))
+                {
+                    contents.Add($"{eventId},Estimize,Eps,{csv[10]},{csv[11]},{csv[12]},{csv[13]},{quarter},{csv[14]}");
+                }
+                if (!string.IsNullOrWhiteSpace(csv[15]))
+                {
+                    contents.Add($"{eventId},Estimize,Revenue,{csv[15]},{csv[16]},{csv[17]},{csv[18]},{quarter},{csv[19]}");
+                }
+                if (!string.IsNullOrWhiteSpace(csv[20]))
+                {
+                    contents.Add($"{eventId},WallStreet,Eps,{csv[20]},,,,{quarter},");
+                }
+                if (!string.IsNullOrWhiteSpace(csv[21]))
+                {
+                    contents.Add($"{eventId},WallStreet,Revenue,{csv[21]},,,,{quarter},");
+                }
             }
+
+            foreach (var kvp in contentsBySymbol)
+            {
+                SaveContentToFile(_destinationFolder.FullName, kvp.Key, kvp.Value);
+            }
+
+            Log.Trace($"ProcessHistoricalData.Run(): Finished in {stopwatch.Elapsed.ToStringInvariant(null)}");
+            return true;
         }
 
-        private IEnumerable<EstimizeConsensus> Unpack(EstimizeRelease estimizeEstimate, Source source, Type type, JObject jObject)
+        private void PatchMissingConsensusData(FileInfo releaseFile, List<EstimizeRelease> releases)
         {
-            var jToken = jObject[source.ToLower()][type.ToLower()];
-            var revisionsJToken = jToken["revisions"];
-
-            var consensuses = revisionsJToken == null
-                ? new List<EstimizeConsensus>()
-                : JsonConvert.DeserializeObject<List<EstimizeConsensus>>(revisionsJToken.ToString(), JsonSerializerSettings);
-
-            consensuses.Add(JsonConvert.DeserializeObject<EstimizeConsensus>(jToken.ToString(), JsonSerializerSettings));
-
-            foreach (var consensus in consensuses)
+            if (releases.Count > 0)
             {
-                consensus.Id = estimizeEstimate.Id;
-                consensus.FiscalYear = estimizeEstimate.FiscalYear;
-                consensus.FiscalQuarter = estimizeEstimate.FiscalQuarter;
-                consensus.Source = source;
-                consensus.Type = type;
+                var consensusFile = releaseFile.FullName.Replace("release", "consensus");
+                if (File.Exists(consensusFile))
+                {
+                    var consensusIds = File.ReadLines(consensusFile).Select(line => line.Split(',')[1]).ToHashSet();
+                    releases = [.. releases.Where(x => !consensusIds.Contains(x.Id))];
+                }
             }
 
-            return consensuses.Where(x => x.UpdatedAt > DateTime.MinValue);
+            if (releases.Count == 0)
+            {
+                return;
+            }
+
+            Log.Trace($"EstimizeConsensusDataDownloader.PatchMissingConsensusData(): Missing Consensus for {releaseFile.Name}: {releases.Count}");
+
+            // Makes sure we don't overrun Estimize rate limits accidentally
+            IndexGate.WaitToProceed();
+
+            var tasks = releases
+                .Select(x => HttpRequester($"/releases/{x.Id}/consensus")
+                .ContinueWith(y =>
+                {
+                    if (y.IsFaulted)
+                    {
+                        Log.Error($"EstimizeConsensusDataDownloader.PatchMissingConsensusData(): Failed to get data for /releases/{x.Id}/consensus");
+                        return [];
+                    }
+
+                    var result = y.Result;
+                    if (string.IsNullOrEmpty(result))
+                    {
+                        return [];
+                    }
+
+                    var csvContents = new List<string>();
+
+                    foreach (var (source, data) in JObject.Parse(result))
+                    {
+                        foreach (var (type, datum) in data as JObject)
+                        {
+                            var consensus = JsonConvert.DeserializeObject<EstimizeConsensus>(datum.ToString(), JsonSerializerSettings);
+                            if (consensus == null || consensus.UpdatedAt.Year <= 2011 || consensus.UpdatedAt > DateTime.UtcNow)
+                            {
+                                continue;
+                            }
+                            csvContents.Add($"{consensus.UpdatedAt.ToUniversalTime():yyyyMMdd HH:mm:ss}," +
+                                $"{x.Id}," +
+                                $"{Enum.Parse<Source>(source, true)}," +
+                                $"{Enum.Parse<Type>(type, true)}," +
+                                $"{consensus.Mean},{consensus.High},{consensus.Low},{consensus.StandardDeviation}," +
+                                $"{x.FiscalYear},{x.FiscalYear},{consensus.Count}");
+                        }
+                    }
+
+                    return csvContents;
+                })
+            );
+            Task.WaitAll([.. tasks]);
+
+            var csvContents = tasks.SelectMany(x => x.Result).ToList();
+            SaveContentToFile(_destinationFolder.FullName, releaseFile.Name[..^4], csvContents);
         }
     }
 }

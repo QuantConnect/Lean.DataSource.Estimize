@@ -16,6 +16,8 @@
 using Newtonsoft.Json;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
+using QuantConnect.Data.Auxiliary;
+using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Util;
 using System;
@@ -26,63 +28,49 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Policy;
 using System.Threading.Tasks;
 
 namespace QuantConnect.DataProcessing
 {
     public abstract class EstimizeDataDownloader
     {
-        private readonly string _clientKey;
+        private readonly string _clientKey = Config.Get("estimize-api-key");
+        private readonly MapFileResolver _mapFileResolver;
         private readonly int _maxRetries = Config.GetInt("estimize-http-retries", 5);
         private readonly int _sleepMs = Config.GetInt("estimize-http-fail-sleep-ms", 1000);
-        private static readonly List<char> _defunctDelimiters = new List<char>
-        {
-            '-',
-            '_'
-        };
+        private static readonly List<char> _defunctDelimiters = [ '-', '_' ];
 
         /// <summary>
         /// Control the rate of download per unit of time.
         /// </summary>
-        public RateGate IndexGate { get; }
+        /// <remarks>
+        /// Represents rate limits of 10 requests per 1.1 second
+        /// </remarks>
+        public RateGate IndexGate { get; } = new(10, TimeSpan.FromSeconds(1.1));
 
-        protected readonly JsonSerializerSettings JsonSerializerSettings = new JsonSerializerSettings
+        protected readonly JsonSerializerSettings JsonSerializerSettings = new()
         {
             DateTimeZoneHandling = DateTimeZoneHandling.Utc
         };
 
-        protected EstimizeDataDownloader()
+        protected EstimizeDataDownloader(IMapFileProvider mapFileProvider)
         {
-            _clientKey = Config.Get("estimize-api-key");
-
-            // Represents rate limits of 10 requests per 1.1 second
-            IndexGate = new RateGate(10, TimeSpan.FromSeconds(1.1));
+            _mapFileResolver = mapFileProvider.Get(AuxiliaryDataKey.EquityUsa);
         }
 
-        /// <summary>
-        /// Get Trading Economics data for a given this start and end times(in UTC).
-        /// </summary>
-        /// <param name="symbol">Symbol for the data we're looking for.</param>
-        /// <param name="resolution">Resolution of the data request</param>
-        /// <param name="startUtc">Start time of the data in UTC</param>
-        /// <param name="endUtc">End time of the data in UTC</param>
-        /// <returns>Enumerable of string representing data for this date range</returns>
-        public IEnumerable<BaseData> Get(Symbol symbol, Resolution resolution, DateTime startUtc, DateTime endUtc)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task<List<Company>> GetCompanies()
+        public List<Company> GetCompanies()
         {
             try
             {
-                var content = await HttpRequester("/companies");
-                return JsonConvert.DeserializeObject<List<Company>>(content);
+                var content = HttpRequester("/companies").Result;
+                return [.. JsonConvert.DeserializeObject<List<Company>>(content).DistinctBy(x => x.Ticker)];
             }
             catch (Exception e)
             {
-                throw new Exception("EstimizeDownloader.GetSymbols(): Error parsing companies list", e);
+                Log.Error($"EstimizeDataDownloader.GetCompanies(): Error parsing companies list", e);    
             }
+            return [];
         }
 
         public async Task<string> HttpRequester(string url)
@@ -91,30 +79,28 @@ namespace QuantConnect.DataProcessing
             {
                 try
                 {
-                    using (var client = new HttpClient())
+                    using var client = new HttpClient();
+                    client.BaseAddress = new Uri("https://api.estimize.com/");
+                    client.DefaultRequestHeaders.Clear();
+
+                    // You must supply your API key in the HTTP header X-Estimize-Key,
+                    // otherwise you will receive a 403 Forbidden response
+                    client.DefaultRequestHeaders.Add("X-Estimize-Key", _clientKey);
+
+                    // Responses are in JSON: you need to specify the HTTP header Accept: application/json
+                    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                    var response = await client.GetAsync(Uri.EscapeUriString(url));
+
+                    if (response.StatusCode == HttpStatusCode.NotFound)
                     {
-                        client.BaseAddress = new Uri("https://api.estimize.com/");
-                        client.DefaultRequestHeaders.Clear();
-
-                        // You must supply your API key in the HTTP header X-Estimize-Key,
-                        // otherwise you will receive a 403 Forbidden response
-                        client.DefaultRequestHeaders.Add("X-Estimize-Key", _clientKey);
-
-                        // Responses are in JSON: you need to specify the HTTP header Accept: application/json
-                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-                        var response = await client.GetAsync(Uri.EscapeUriString(url));
-
-                        if (response.StatusCode == HttpStatusCode.NotFound)
-                        {
-                            Log.Error($"EstimizeDataDownloader.HttpRequester(): File not found at url: {url}");
-                            return string.Empty;
-                        }
-
-                        response.EnsureSuccessStatusCode();
-
-                        return await response.Content.ReadAsStringAsync();
+                        Log.Error($"EstimizeDataDownloader.HttpRequester(): File not found at url: {url}");
+                        return string.Empty;
                     }
+
+                    response.EnsureSuccessStatusCode();
+
+                    return await response.Content.ReadAsStringAsync();
                 }
                 catch (Exception e)
                 {
@@ -141,7 +127,7 @@ namespace QuantConnect.DataProcessing
             var lines = new HashSet<string>(contents);
             if (finalPath.Exists)
             {
-                Log.Trace($"EstimizeDataDownloader.SaveContentToZipFile(): Adding to existing file: {finalPath}");
+                Log.Trace($"EstimizeDataDownloader.SaveContentToFile(): Adding to existing file: {finalPath}");
                 foreach (var line in File.ReadAllLines(finalPath.FullName))
                 {
                     lines.Add(line);
@@ -149,7 +135,7 @@ namespace QuantConnect.DataProcessing
             }
             else
             {
-                Log.Trace($"EstimizeDataDownloader.SaveContentToZipFile(): Writing to file: {finalPath}");
+                Log.Trace($"EstimizeDataDownloader.SaveContentToFile(): Writing to file: {finalPath}");
             }
 
             var finalLines = lines.OrderBy(x => DateTime.ParseExact(x.Split(',').First(), "yyyyMMdd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal))
@@ -204,6 +190,51 @@ namespace QuantConnect.DataProcessing
                 .Replace(" ", string.Empty)
                 .Replace("|", string.Empty)
                 .Replace("-", ".");
+        }
+
+        public string GetMappedSymbol(string estimateTicker, DateTime createdAt)
+        {
+            if (!TryNormalizeDefunctTicker(estimateTicker, out var ticker))
+            {
+                Log.Error($"EstimizeDataDownloader.GetMappedSymbol(): Defunct ticker {estimateTicker} is unable to be parsed. Continuing...");
+                return string.Empty;
+            }
+            var normalizedTicker = NormalizeTicker(ticker);
+            var oldTicker = normalizedTicker;
+            var newTicker = normalizedTicker;
+
+            try
+            {
+                var mapFile = _mapFileResolver.ResolveMapFile(normalizedTicker, createdAt);
+
+                // Ensure we're writing to the correct historical ticker
+                if (!mapFile.Any())
+                {
+                    Log.Trace($"EstimizeDataDownloader.GetMappedSymbol(): Failed to find map file for: {newTicker} - on: {createdAt}");
+                    return string.Empty;
+                }
+
+                newTicker = mapFile.GetMappedSymbol(createdAt);
+                if (string.IsNullOrWhiteSpace(newTicker))
+                {
+                    Log.Trace($"EstimizeDataDownloader.GetMappedSymbol(): New ticker is null. Old ticker: {oldTicker} - on: {createdAt.ToStringInvariant()}");
+                    return string.Empty;
+                }
+
+                if (!string.Equals(oldTicker, newTicker, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    Log.Trace($"EstimizeDataDownloader.GetMappedSymbol(): Remapping {oldTicker} to {newTicker}");
+                }
+            }
+            // We get a failure inside the map file constructor rarely. It tries
+            // to access the last element of an empty list. Maybe this is a bug?
+            catch (Exception e)
+            {
+                Log.Error(e, $"EstimizeDataDownloader.GetMappedSymbol(): Failed to load map file for: {oldTicker} - on {createdAt}");
+                return string.Empty;
+            }
+
+            return newTicker;
         }
 
         public class Company

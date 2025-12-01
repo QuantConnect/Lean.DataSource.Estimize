@@ -15,10 +15,11 @@
 
 using Newtonsoft.Json;
 using QuantConnect.Configuration;
-using QuantConnect.Data.Auxiliary;
 using QuantConnect.DataSource;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
+using QuantConnect.Util;
+using RestSharp.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -30,9 +31,8 @@ namespace QuantConnect.DataProcessing
 {
     public class EstimizeReleaseDataDownloader : EstimizeDataDownloader
     {
-        private readonly string _destinationFolder;
-        private readonly MapFileResolver _mapFileResolver;
-        private readonly HashSet<string> _processTickers;
+        private readonly DirectoryInfo _destinationFolder;
+        private readonly HashSet<string> _processTickers = [];
 
         /// <summary>
         /// Creates a new instance of <see cref="EstimizeReleaseDataDownloader"/>
@@ -40,28 +40,39 @@ namespace QuantConnect.DataProcessing
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="mapFileProvider">The map file provider instance to use</param>
         public EstimizeReleaseDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
+            : base(mapFileProvider)
         {
-            _destinationFolder = Path.Combine(destinationFolder, "release");
-            _mapFileResolver = mapFileProvider.Get(AuxiliaryDataKey.EquityUsa);
-
-            _processTickers = Config.Get("process-tickers", null)?.Split(",").ToHashSet();
-
-            Directory.CreateDirectory(_destinationFolder);
+            _destinationFolder = Directory.CreateDirectory(Path.Combine(destinationFolder, "release"));
+            if (Config.TryGetValue("process-tickers", out string value) && value.HasValue())
+            {
+                _processTickers = [.. value.Split(",")];
+            }
         }
 
         /// <summary>
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public bool Run(out HashSet<string> infoByReleaseId)
+        public bool Run()
         {
             var stopwatch = Stopwatch.StartNew();
-            infoByReleaseId = new();
 
+            if (_processTickers.IsNullOrEmpty())
+            {
+                GetCompanies().DoForEach(x =>
+                    {
+                        var ticker = GetMappedSymbol(x.Ticker, DateTime.UtcNow);
+                        if (string.IsNullOrWhiteSpace(ticker)) return;
+                        _processTickers.Add(ticker);
+                    });
+
+                _destinationFolder.Parent.CreateSubdirectory("estimate")
+                    .EnumerateFiles("*.csv", SearchOption.AllDirectories)
+                    .DoForEach(x => _processTickers.Add(x.Name[0..^4].ToUpper()));
+            }
             try
             {
-                var companies = GetCompanies().Result.DistinctBy(x => x.Ticker).ToList();
-                var count = companies.Count;
+                var count = _processTickers.Count;
                 var currentPercent = 0.05;
                 var percent = 0.05;
                 var i = 0;
@@ -72,28 +83,8 @@ namespace QuantConnect.DataProcessing
 
                 var tasks = new List<Task>();
 
-                foreach (var company in companies)
-                {
-                    // Include tickers that are "defunct".
-                    // Remove the tag because it cannot be part of the API endpoint.
-                    // This is separate from the NormalizeTicker(...) method since
-                    // we don't convert tickers with `-`s into the format we can successfully
-                    // index mapfiles with.
-                    var estimizeTicker = company.Ticker;
-                    string ticker;
-
-                    if (!TryNormalizeDefunctTicker(estimizeTicker, out ticker))
-                    {
-                        Log.Error($"EstimizeReleaseDataDownloader(): Defunct ticker {estimizeTicker} is unable to be parsed. Continuing...");
-                        continue;
-                    }
-
-                    if (_processTickers != null && !_processTickers.Contains(ticker, StringComparer.InvariantCultureIgnoreCase))
-                    {
-                        Log.Trace($"EstimizeReleaseDataDownloader.Run(): Skipping {ticker} since it is not in the list of predefined tickers");
-                        continue;
-                    }
-
+                foreach (var ticker in _processTickers)
+                {   
                     // Makes sure we don't overrun Estimize rate limits accidentally
                     IndexGate.WaitToProceed();
 
@@ -109,7 +100,7 @@ namespace QuantConnect.DataProcessing
 
                                     if (y.IsFaulted)
                                     {
-                                        Log.Error($"EstimizeReleaseDataDownloader.Run(): Failed to get data for {company}");
+                                        Log.Error($"EstimizeReleaseDataDownloader.Run(): Failed to get data for {ticker}");
                                         return;
                                     }
 
@@ -125,54 +116,17 @@ namespace QuantConnect.DataProcessing
                                     // data and make backtests non-deterministic. We want to have
                                     // consistency with our data in live trading historical requests as well
                                     var releases = JsonConvert.DeserializeObject<List<EstimizeRelease>>(result, JsonSerializerSettings)
-                                        .GroupBy(x =>
-                                        {
-                                            var normalizedTicker = NormalizeTicker(ticker);
-                                            var releaseDate = x.ReleaseDate;
-
-                                            try
-                                            {
-                                                var mapFile = _mapFileResolver.ResolveMapFile(normalizedTicker, releaseDate);
-                                                var oldTicker = normalizedTicker;
-                                                var newTicker = normalizedTicker;
-
-                                                // Ensure we're writing to the correct historical ticker
-                                                if (!mapFile.Any())
-                                                {
-                                                    Log.Trace($"EstimizeReleaseDataDownloader.Run(): Failed to find map file for: {newTicker} - on: {releaseDate}");
-                                                    return string.Empty;
-                                                }
-
-                                                newTicker = mapFile.GetMappedSymbol(releaseDate);
-                                                if (string.IsNullOrWhiteSpace(newTicker))
-                                                {
-                                                    Log.Trace($"EstimizeReleaseDataDownloader.Run(): Failed to find mapping for null new ticker. Old ticker: {oldTicker} - on: {releaseDate}");
-                                                    return string.Empty;
-                                                }
-
-                                                if (!string.Equals(oldTicker, newTicker, StringComparison.InvariantCultureIgnoreCase))
-                                                {
-                                                    Log.Trace($"EstimizeReleaseDataDownloader.Run(): Remapped from {oldTicker} to {newTicker} for {releaseDate}");
-                                                }
-
-                                                return newTicker;
-                                            }
-                                            // We get a failure inside the map file constructor rarely. It tries
-                                            // to access the last element of an empty list. Maybe this is a bug?
-                                            catch (InvalidOperationException e)
-                                            {
-                                                Log.Error(e, $"EstimizeReleaseDataDownloader.Run(): Failed to load map file for: {normalizedTicker} - on: {releaseDate}");
-                                                return string.Empty;
-                                            }
-                                        })
+                                        // Filter out anything before 2011 up to today
+                                        .Where(x => x.ReleaseDate.Year >= 2011)
+                                        .GroupBy(x => GetMappedSymbol(ticker, x.ReleaseDate))
                                         .Where(x => !string.IsNullOrEmpty(x.Key));
 
                                     foreach (var kvp in releases)
                                     {
                                         var csvContents = kvp.Select(x => $"{x.ReleaseDate.ToUniversalTime():yyyyMMdd HH:mm:ss},{x.Id},{x.FiscalYear},{x.FiscalQuarter},{x.Eps},{x.Revenue},{x.ConsensusEpsEstimate},{x.ConsensusRevenueEstimate},{x.WallStreetEpsEstimate},{x.WallStreetRevenueEstimate},{x.ConsensusWeightedEpsEstimate},{x.ConsensusWeightedRevenueEstimate}");
-                                        SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
+                                        SaveContentToFile(_destinationFolder.FullName, kvp.Key, csvContents);
 
-                                        fiscalYearQuarterByReleaseId.AddRange(kvp.Select(x => $"{x.Id},{kvp.Key},{x.FiscalYear},{x.FiscalQuarter}"));
+                                        fiscalYearQuarterByReleaseId.AddRange(kvp.Select(x => $"{kvp.Key},{x.FiscalYear},{x.FiscalQuarter},{x.Id}"));
                                     }
 
                                     var percentDone = i / count;
@@ -186,8 +140,7 @@ namespace QuantConnect.DataProcessing
                     );
                 }
 
-                Task.WaitAll(tasks.ToArray());
-                infoByReleaseId = new HashSet<string>(fiscalYearQuarterByReleaseId);
+                Task.WaitAll([.. tasks]);
             }
             catch (Exception e)
             {

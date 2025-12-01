@@ -14,23 +14,22 @@
 */
 
 using Newtonsoft.Json;
-using QuantConnect.Data.Auxiliary;
+using QuantConnect.Configuration;
 using QuantConnect.DataSource;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
+using QuantConnect.Util;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace QuantConnect.DataProcessing
 {
     public class EstimizeEstimateDataDownloader : EstimizeDataDownloader
     {
         private readonly string _destinationFolder;
-        private readonly MapFileResolver _mapFileResolver;
 
         /// <summary>
         /// Creates a new instance of <see cref="EstimizeEstimateDataDownloader"/>
@@ -38,10 +37,9 @@ namespace QuantConnect.DataProcessing
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="mapFileProvider">The map file provider instance to use</param>
         public EstimizeEstimateDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
+            : base(mapFileProvider)
         {
             _destinationFolder = Path.Combine(destinationFolder, "estimate");
-            _mapFileResolver = mapFileProvider.Get(AuxiliaryDataKey.EquityUsa);
-
             Directory.CreateDirectory(_destinationFolder);
         }
 
@@ -49,105 +47,40 @@ namespace QuantConnect.DataProcessing
         /// Runs the instance of the object.
         /// </summary>
         /// <returns>True if process all downloads successfully</returns>
-        public bool Run(DateTime date)
+        public bool Run(DateTime date, bool patchData)
         {
             var stopwatch = Stopwatch.StartNew();
+            var endDate = patchData ? DateTime.UtcNow : date;
 
             try
             {
                 Log.Trace($"EstimizeEstimateDataDownloader.Run(): Start processing");
 
-                var tasks = new List<Task>();
-                // Makes sure we don't overrun Estimize rate limits accidentally
-                IndexGate.WaitToProceed();
+                var result = HttpRequester($"/estimates?start_date={date.AddDays(-5):yyyy-MM-dd}&end_date={endDate:yyyy-MM-dd}").Result;
+                if (string.IsNullOrEmpty(result))
+                {
+                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): No data received {stopwatch.Elapsed.ToStringInvariant(null)}");
+                    return false;
+                }
 
-                tasks.Add(
-                    // Extra days for redundancy
-                    HttpRequester($"/estimates?start_date={date.AddDays(-5):yyyy-MM-dd}&end_date={date:yyyy-MM-dd}")
-                        .ContinueWith(
-                            y =>
-                            {
-                                if (y.IsFaulted)
-                                {
-                                    Log.Error($"EstimizeEstimateDataDownloader.Run(): Failed to get data");
-                                    return;
-                                }
-
-                                var result = y.Result;
-                                if (string.IsNullOrEmpty(result))
-                                {
-                                    Log.Trace($"EstimizeEstimateDataDownloader.Run(): No data received");
-                                    return;
-                                }
-
-                                var estimates = JsonConvert.DeserializeObject<List<EstimizeEstimate>>(result, JsonSerializerSettings)
-                                    .GroupBy(estimate =>
-                                    {
-                                        if (!TryNormalizeDefunctTicker(estimate.Ticker, out var ticker))
-                                        {
-                                            Log.Error($"EstimizeEstimateDataDownloader(): Defunct ticker {estimate.Ticker} is unable to be parsed. Continuing...");
-                                            return string.Empty;
-                                        }
-                                        var normalizedTicker = NormalizeTicker(ticker);
-                                        var oldTicker = normalizedTicker;
-                                        var newTicker = normalizedTicker;
-                                        var createdAt = estimate.CreatedAt;
-
-                                        try
-                                        {
-                                            var mapFile = _mapFileResolver.ResolveMapFile(normalizedTicker, createdAt);
-
-                                            // Ensure we're writing to the correct historical ticker
-                                            if (!mapFile.Any())
-                                            {
-                                                Log.Trace($"EstimizeEstimateDataDownloader.Run(): Failed to find map file for: {newTicker} - on: {createdAt}");
-                                                return string.Empty;
-                                            }
-
-                                            newTicker = mapFile.GetMappedSymbol(createdAt);
-                                            if (string.IsNullOrWhiteSpace(newTicker))
-                                            {
-                                                Log.Trace($"EstimizeEstimateDataDownloader.Run(): New ticker is null. Old ticker: {oldTicker} - on: {createdAt.ToStringInvariant()}");
-                                                return string.Empty;
-                                            }
-
-                                            if (!string.Equals(oldTicker, newTicker, StringComparison.InvariantCultureIgnoreCase))
-                                            {
-                                                Log.Trace($"EstimizeEstimateDataDownloader.Run(): Remapping {oldTicker} to {newTicker}");
-                                            }
-                                        }
-                                        // We get a failure inside the map file constructor rarely. It tries
-                                        // to access the last element of an empty list. Maybe this is a bug?
-                                        catch (InvalidOperationException e)
-                                        {
-                                            Log.Error(e, $"EstimizeEstimateDataDownloader.Run(): Failed to load map file for: {oldTicker} - on {createdAt}");
-                                            return string.Empty;
-                                        }
-
-                                        return newTicker;
-                                    })
-                                    .Where(kvp => !string.IsNullOrEmpty(kvp.Key));
-
-                                foreach (var kvp in estimates)
-                                {
-                                    var csvContents = kvp.Select(x =>
-                                        $"{x.CreatedAt.ToStringInvariant("yyyyMMdd HH:mm:ss")}," +
-                                        $"{x.Id}," +
-                                        $"{x.AnalystId}," +
-                                        $"{x.UserName}," +
-                                        $"{x.FiscalYear.ToStringInvariant()}," +
-                                        $"{x.FiscalQuarter.ToStringInvariant()}," +
-                                        $"{x.Eps.ToStringInvariant()}," +
-                                        $"{x.Revenue.ToStringInvariant()}," +
-                                        $"{x.Flagged.ToStringInvariant().ToLowerInvariant()}"
-                                    );
-                                    SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
-                                }
-                            }
-                        )
-                    );
-
-                Task.WaitAll(tasks.ToArray());
+                JsonConvert.DeserializeObject<List<EstimizeEstimate>>(result, JsonSerializerSettings)
+                    .GroupBy(estimate => GetMappedSymbol(estimate.Ticker, estimate.CreatedAt))
+                    .Where(kvp => !string.IsNullOrEmpty(kvp.Key))
+                    .DoForEach(kvp =>
+                    {
+                        var csvContents = kvp.Select(x =>
+                            $"{x.CreatedAt.ToStringInvariant("yyyyMMdd HH:mm:ss")}," +
+                            $"{x.Id}," +
+                            $"{x.AnalystId}," +
+                            $"{x.UserName}," +
+                            $"{x.FiscalYear.ToStringInvariant()}," +
+                            $"{x.FiscalQuarter.ToStringInvariant()}," +
+                            $"{x.Eps.ToStringInvariant()}," +
+                            $"{x.Revenue.ToStringInvariant()}," +
+                            $"{x.Flagged.ToStringInvariant().ToLowerInvariant()}"
+                        );
+                        SaveContentToFile(_destinationFolder, kvp.Key, csvContents);
+                    });
             }
             catch (Exception e)
             {
@@ -156,6 +89,75 @@ namespace QuantConnect.DataProcessing
             }
 
             Log.Trace($"EstimizeEstimateDataDownloader.Run(): Finished in {stopwatch.Elapsed.ToStringInvariant(null)}");
+            return true;
+        }
+    
+        public bool ProcessHistoricalData(ref DateTime lastProcessedDate)
+        {
+            var stopwatch = Stopwatch.StartNew();
+
+            var filename = Config.Get("estimize-historical-file", null);
+            if (string.IsNullOrEmpty(filename) || !File.Exists(filename))
+            {
+                Log.Trace($"{GetType().Name}.ProcessHistoricalData(): No historical data file. Skipping...");
+                return true;
+            }
+
+            var contentsBySymbol = new Dictionary<string, List<string>>();
+            using var entryStream = Compression.Unzip(filename, "combined_estimates_new.csv", out var _);
+
+            // estimate_id,eps,revenue,created_at,flagged,release_id,fiscal_quarter,fiscal_year,reported.eps,reported.revenue,reports_at,instrument_id,ticker,cusip,instrument_name,instrument_sector,instrument_industry,user_id,username,user_bio1,user_bio2,user_bio3,user_created_at,point_in_time_ticker,point_in_time_cusip,period_ends_on
+            while (!entryStream.EndOfStream)
+            {
+                var line = entryStream.ReadLine();
+
+                if (line.Count(x => x == ',') > 25)
+                {
+                    var instrumentName = line[line.IndexOf('\"')..(line.LastIndexOf('\"') + 1)];
+                    line = line.Replace(instrumentName, string.Empty);
+                }
+
+                var csv = line.Split(',').Select(x => x.Trim()).ToArray();
+                if (csv.Length < 23 || !char.IsDigit(csv[1], 0))
+                {
+                    continue;
+                }
+
+                var createdAt = Parse.DateTimeExact(csv[3], "yyyy-MM-ddTHH:mm:ssZ");
+                if (createdAt.Year < 2011 || createdAt > DateTime.UtcNow)
+                {
+                    continue;
+                }
+
+                var mappedSymbol = GetMappedSymbol(
+                    string.IsNullOrWhiteSpace(csv[^3]) ? csv[12] : csv[^3], 
+                    createdAt);
+
+                if (string.IsNullOrEmpty(mappedSymbol))
+                {
+                    continue;
+                }
+
+                if (!contentsBySymbol.TryGetValue(mappedSymbol, out var contents))
+                {
+                    contentsBySymbol[mappedSymbol] = contents = [];
+                }
+                contents.Add($"{createdAt.ToStringInvariant("yyyyMMdd HH:mm:ss")},{csv[0]},{csv[17]},{csv[18]},{csv[6]},{csv[7]},{csv[1]},{csv[2]},{csv[4]}");
+                    
+                if (createdAt > lastProcessedDate)
+                {
+                    lastProcessedDate = createdAt;
+                }
+            }
+            
+
+            foreach (var kvp in contentsBySymbol)
+            {
+                SaveContentToFile(_destinationFolder, kvp.Key, kvp.Value);
+            }
+
+            lastProcessedDate = lastProcessedDate.Date;
+            Log.Trace($"ProcessHistoricalData.Run(): Finished in {stopwatch.Elapsed.ToStringInvariant(null)}");
             return true;
         }
     }
