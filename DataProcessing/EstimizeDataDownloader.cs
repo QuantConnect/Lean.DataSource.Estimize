@@ -15,7 +15,6 @@
 
 using Newtonsoft.Json;
 using QuantConnect.Configuration;
-using QuantConnect.Data;
 using QuantConnect.Data.Auxiliary;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
@@ -28,7 +27,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Security.Policy;
 using System.Threading.Tasks;
 
 namespace QuantConnect.DataProcessing
@@ -54,8 +52,13 @@ namespace QuantConnect.DataProcessing
             DateTimeZoneHandling = DateTimeZoneHandling.Utc
         };
 
-        protected EstimizeDataDownloader(IMapFileProvider mapFileProvider)
+        protected EstimizeDataDownloader()
         {
+            var mapFileProvider =
+                Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
+            mapFileProvider.Initialize(
+                Composer.Instance.GetExportedValueByTypeName<IDataProvider>(Config.Get("data-provider", "DefaultDataProvider")));
+
             _mapFileResolver = mapFileProvider.Get(AuxiliaryDataKey.EquityUsa);
         }
 

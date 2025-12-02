@@ -36,7 +36,7 @@ namespace QuantConnect.DataLibrary.Tests
     public class EstimizeTests
     {
         private static IDataProvider EstimizeDataProvider = new DefaultDataProvider();
-        private static IMapFileProvider _mapFileProvider;
+
         private static Symbol SymbolAAPL => Symbol.Create("AAPL", SecurityType.Equity, Market.USA);
 
         private readonly JsonSerializerSettings _jsonSerializerSettings = new JsonSerializerSettings
@@ -50,9 +50,6 @@ namespace QuantConnect.DataLibrary.Tests
             RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2012, typeof(EstimizeConsensus));
             RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2013, typeof(EstimizeEstimate));
             RuntimeTypeModel.Default[typeof(BaseData)].AddSubType(2014, typeof(EstimizeRelease));
-
-            _mapFileProvider = Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
-            _mapFileProvider.Initialize(EstimizeDataProvider);
         }
 
         [Test, Ignore("Requires Estimize credentials")]
@@ -61,9 +58,9 @@ namespace QuantConnect.DataLibrary.Tests
             var tickers = new List<EstimizeDataDownloader.Company>();
 
             var destinationFolder = Path.Combine(Globals.DataFolder, "alternative", "estimize");
-            var downloader = new EstimizeReleaseDataDownloader(destinationFolder, _mapFileProvider);
+            var downloader = new EstimizeReleaseDataDownloader(destinationFolder);
 
-            Assert.DoesNotThrow(() => tickers = downloader.GetCompanies().Result);
+            Assert.DoesNotThrow(() => tickers = downloader.GetCompanies());
             Assert.IsTrue(tickers.Count > 0);
         }
 

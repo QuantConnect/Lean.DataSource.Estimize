@@ -44,8 +44,7 @@ namespace QuantConnect.DataProcessing
         /// </summary>
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="processedDataDirectory">Processed data directory, the root path of where processed data lives</param>
-        public EstimizeConsensusDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
-            : base(mapFileProvider)
+        public EstimizeConsensusDataDownloader(string destinationFolder)
         {
             _destinationFolder = Directory.CreateDirectory(Path.Combine(destinationFolder, "consensus"));
             _releaseFolder = _destinationFolder.Parent.CreateSubdirectory("release");

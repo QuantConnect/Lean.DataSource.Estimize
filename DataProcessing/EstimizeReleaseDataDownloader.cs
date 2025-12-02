@@ -39,8 +39,7 @@ namespace QuantConnect.DataProcessing
         /// </summary>
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="mapFileProvider">The map file provider instance to use</param>
-        public EstimizeReleaseDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
-            : base(mapFileProvider)
+        public EstimizeReleaseDataDownloader(string destinationFolder)
         {
             _destinationFolder = Directory.CreateDirectory(Path.Combine(destinationFolder, "release"));
             if (Config.TryGetValue("process-tickers", out string value) && value.HasValue())

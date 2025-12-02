@@ -36,8 +36,7 @@ namespace QuantConnect.DataProcessing
         /// </summary>
         /// <param name="destinationFolder">The folder where the data will be saved</param>
         /// <param name="mapFileProvider">The map file provider instance to use</param>
-        public EstimizeEstimateDataDownloader(string destinationFolder, IMapFileProvider mapFileProvider)
-            : base(mapFileProvider)
+        public EstimizeEstimateDataDownloader(string destinationFolder)
         {
             _destinationFolder = Path.Combine(destinationFolder, "estimate");
             Directory.CreateDirectory(_destinationFolder);

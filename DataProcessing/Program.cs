@@ -18,7 +18,6 @@ using QuantConnect.Logging;
 using System;
 using System.Diagnostics;
 using System.IO;
-using QuantConnect.Interfaces;
 using QuantConnect.Util;
 
 namespace QuantConnect.DataProcessing
@@ -49,16 +48,12 @@ namespace QuantConnect.DataProcessing
             var temporaryFolder = Config.Get("temp-output-directory", "/temp-output-directory");
             var tempEstimizeFolder = Path.Combine(temporaryFolder, "alternative", "estimize");
 
-            var mapFileResolver =
-                Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalZipMapFileProvider"));
-            mapFileResolver.Initialize(
-                Composer.Instance.GetExportedValueByTypeName<IDataProvider>(Config.Get("data-provider", "DefaultDataProvider")));
 
             // Makes sure we can download to the temp folder in a clean docker image
             Directory.CreateDirectory(tempEstimizeFolder);
-            var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder, mapFileResolver);
-            var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder, mapFileResolver);
-            var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder, mapFileResolver);
+            var estimateDownloader = new EstimizeEstimateDataDownloader(tempEstimizeFolder);
+            var releaseDownloader = new EstimizeReleaseDataDownloader(tempEstimizeFolder);
+            var consensusDownloader = new EstimizeConsensusDataDownloader(tempEstimizeFolder);
 
             var timer = Stopwatch.StartNew();
 
